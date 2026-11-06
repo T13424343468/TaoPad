@@ -694,6 +694,19 @@ def main():
     win.set_focus()
     time.sleep(1)
 
+    # 诊断输出：主窗口与顶层弹窗的元素类型统计（跑批日志可直接定位菜单是否可达）
+    from collections import Counter
+    _cnt = Counter()
+    for _d in _iter_candidates(win):
+        try:
+            _t = _d.window_text()
+            _ct = _d.element_info.control_type
+            if _t or _ct in ("MenuItem", "MenuFlyoutItem", "ToggleMenuFlyoutItem"):
+                print("EL", _ct, "|", (_t or "")[:60])
+        except Exception:
+            continue
+    print("MENU-TITLES 可见:", [n for n in ["文件", "编辑", "搜索", "查看", "语言", "编码", "主题", "工具"] if find_el(win, n) is not None])
+
     case("S01 启动就绪与状态栏", lambda: c_startup(win))
     case("O08a 新建标签", lambda: c_new_tab(win))
     case("E01 输入/全选/复制", lambda: c_type_undo_redo(win))
