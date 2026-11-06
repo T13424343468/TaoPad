@@ -1,0 +1,308 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <!-- TaoPad 安装包：功能树中可勾选要关联的文件格式 -->
+  <Package Codepage="936" Name="TaoPad"
+           Manufacturer="TaoPad"
+           Version="1.0.9"
+           UpgradeCode="D5A3F0C2-7B18-4E2A-9C4D-1F2E3A4B5C6D"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <MajorUpgrade DowngradeErrorMessage="已安装了更新版本的 TaoPad，如需重装请先在“应用”中卸载。" AllowSameVersionUpgrades="yes" />
+    <MediaTemplate EmbedCab="yes" />
+    <!-- 卸载列表图标：设置-应用/各类软件管理里显示 TaoPad 自己的图标，
+         不再是白板。ARPPRODUCTICON 指向下面的 Icon 元素，由 WiX 自动
+         写入卸载列表的 DisplayIcon -->
+    <Icon Id="TaoPadIco" SourceFile="$(PublishDir)\Assets\TaoPad.ico" />
+    <Property Id="ARPPRODUCTICON" Value="TaoPadIco" />
+    <!-- 进程残留修复：安装/升级/卸载的文件操作开始前，先结束正在运行的
+         TaoPad。否则旧进程继续活着：占用文件、卸载后进程仍在系统里。
+         Return=ignore：程序本来就没在运行时 taskkill 报错不影响安装。 -->
+    <!-- 属性引用必须在"设置属性"动作里求值，直接写进 Property 值会告警；
+         直接调用 taskkill（不经过 cmd），少一层引号转义 -->
+    <CustomAction Id="SetKillCmd" Property="KILLCMD" Value="[SystemFolder]taskkill.exe" />
+    <CustomAction Id="KillRunningApp" Property="KILLCMD"
+                  ExeCommand="/f /im TaoPad.exe"
+                  Execute="immediate" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="SetKillCmd" After="InstallValidate" />
+      <Custom Action="KillRunningApp" After="SetKillCmd" />
+    </InstallExecuteSequence>
+    <!-- 关键修复：安装目录支持自定义，且必须在界面弹出前完成路径解析。
+         显式 CostFinalize（InstallUISequence 950）先把默认目录
+         C:\Program Files\TaoPad 算好再弹窗：目录框不会空着（空目录会相对
+         解析到 MSI 自己旁边，即 out 散落的元凶），用户改路径也照常生效。 -->
+
+    <!-- 默认安装路径只改盘符：保持 Program Files\TaoPad 结构，C 换 D。
+         与目录表同名的属性会在路径解析后覆盖默认值，
+         界面目录框显示 D:\Program Files\TaoPad，用户仍可自行修改。
+         字面量值不涉及属性引用，不会触发 WIX1077。 -->
+    <Property Id="INSTALLFOLDER" Value="D:\Program Files\TaoPad" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/antpad/antpad" />
+
+    <!-- ============ 微信式单页安装界面 ============
+         一页搞定：许可协议勾选 + 安装目录 + 选项打勾 + 立即安装。
+         勾选默认全开；取消勾选会在安装时跳过对应组件。 -->
+    <Property Id="DESKTOP_SHORTCUT" Value="1" />
+    <Property Id="CTX_MENU" Value="1" />
+    <Property Id="ASSOC_ALL" Value="1" />
+
+    <UI Id="TaoPadInstallUI">
+      <!-- 文本样式 -->
+      <TextStyle Id="DlgFont" FaceName="微软雅黑" Size="9" />
+      <TextStyle Id="TitleFont" FaceName="微软雅黑" Size="13" Bold="yes" />
+      <Property Id="DefaultUIFont" Value="DlgFont" />
+
+      <!-- 主页：许可 + 目录 + 选项 -->
+      <Dialog Id="MainDlg" Width="440" Height="300" Title="[ProductName] 安装程序">
+        <Control Id="Title" Type="Text" X="20" Y="12" Width="400" Height="22"
+                 Text="{\TitleFont}安装 TaoPad" />
+        <Control Id="LicenseText" Type="Text" X="20" Y="42" Width="400" Height="92"
+                 Text="TaoPad 1.0.9，版权所有 (c) 2026。本软件供个人与商业用途自由使用。继续安装即表示您接受：本软件按“现状”提供，作者不对使用本软件产生的任何损失承担责任。" />
+        <Control Id="AcceptCheck" Type="CheckBox" X="20" Y="140" Width="400" Height="16"
+                 Property="LICENSE_ACCEPTED" CheckBoxValue="1"
+                 Text="我已阅读并同意许可协议" />
+        <Control Id="SepLine" Type="Line" X="20" Y="164" Width="400" Height="1" />
+
+        <Control Id="DirLabel" Type="Text" X="20" Y="174" Width="320" Height="14"
+                 Text="安装目录（可直接输入，不存在的文件夹会自动创建）：" />
+        <Control Id="DirEdit" Type="PathEdit" X="20" Y="192" Width="310" Height="17"
+                 Property="INSTALLFOLDER" />
+        <Control Id="DeskCheck" Type="CheckBox" X="20" Y="218" Width="320" Height="16"
+                 Property="DESKTOP_SHORTCUT" CheckBoxValue="1" Text="创建桌面快捷方式">
+          <Publish Event="Remove" Value="DeskShortcutF" Condition="NOT DESKTOP_SHORTCUT" />
+          <Publish Event="AddLocal" Value="DeskShortcutF" Condition="DESKTOP_SHORTCUT" />
+        </Control>
+        <Control Id="CtxCheck" Type="CheckBox" X="20" Y="238" Width="320" Height="16"
+                 Property="CTX_MENU" CheckBoxValue="1" Text="添加“用 TaoPad 打开”右键菜单">
+          <Publish Event="Remove" Value="CtxMenuF" Condition="NOT CTX_MENU" />
+          <Publish Event="AddLocal" Value="CtxMenuF" Condition="CTX_MENU" />
+        </Control>
+        <Control Id="AssocCheck" Type="CheckBox" X="20" Y="258" Width="320" Height="16"
+                 Property="ASSOC_ALL" CheckBoxValue="1" Text="关联常见文档类型（txt / md / json 等）">
+          <Publish Event="Remove" Value="AssocTxt;AssocMd;AssocJson;AssocXml;AssocHtml;AssocCs;AssocCpp;AssocPy;AssocSql" Condition="NOT ASSOC_ALL" />
+          <Publish Event="AddLocal" Value="AssocTxt;AssocMd;AssocJson;AssocXml;AssocHtml;AssocCs;AssocCpp;AssocPy;AssocSql" Condition="ASSOC_ALL" />
+        </Control>
+
+        <Control Id="InstallNow" Type="PushButton" X="340" Y="240" Width="80" Height="24"
+                 Default="yes" Text="立即安装">
+          <Publish Event="SpawnDialog" Value="AcceptWarnDlg" Condition="NOT LICENSE_ACCEPTED" Order="1" />
+          <Publish Event="NewDialog" Value="VerifyReadyDlg" Condition="LICENSE_ACCEPTED" Order="2" />
+        </Control>
+        <Control Id="CancelBtn" Type="PushButton" X="340" Y="268" Width="80" Height="18"
+                 Cancel="yes" Text="取消">
+          <Publish Event="EndDialog" Value="Exit" />
+        </Control>
+      </Dialog>
+
+      <!-- 确认页 -->
+      <Dialog Id="VerifyReadyDlg" Width="440" Height="130" Title="[ProductName] 安装程序">
+        <Control Id="ReadyText" Type="Text" X="20" Y="30" Width="400" Height="24"
+                 Text="准备安装 TaoPad，点击“安装”开始。" />
+        <Control Id="BackBtn" Type="PushButton" X="270" Y="95" Width="70" Height="22" Text="返回">
+          <Publish Event="NewDialog" Value="MainDlg" />
+        </Control>
+        <Control Id="InstallBtn" Type="PushButton" X="350" Y="95" Width="70" Height="22"
+                 Default="yes" Text="安装">
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+      </Dialog>
+
+      <!-- 安装进度 -->
+      <Dialog Id="ProgressDlg" Width="440" Height="110" Title="[ProductName] 安装程序" Modeless="yes">
+        <Control Id="ProgressText" Type="Text" X="20" Y="24" Width="400" Height="14"
+                 Text="正在安装，请稍候……" />
+        <Control Id="ProgressBar" Type="ProgressBar" X="20" Y="48" Width="400" Height="14"
+                 Text="正在安装" />
+        <Control Id="CancelBtn" Type="PushButton" X="350" Y="78" Width="70" Height="20"
+                 Cancel="yes" Text="取消">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+
+      <!-- 确认取消 -->
+      <Dialog Id="AcceptWarnDlg" Width="280" Height="90" Title="[ProductName] 安装程序">
+        <Control Id="WarnText" Type="Text" X="20" Y="18" Width="240" Height="18"
+                 Text="请先勾选“我已阅读并同意许可协议”。" />
+        <Control Id="OkBtn" Type="PushButton" X="110" Y="55" Width="60" Height="20"
+                 Default="yes" Text="确定">
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+      </Dialog>
+      <Dialog Id="CancelDlg" Width="280" Height="90" Title="[ProductName] 安装程序">
+        <Control Id="CancelText" Type="Text" X="20" Y="18" Width="240" Height="18"
+                 Text="确定要取消安装吗？" />
+        <Control Id="YesBtn" Type="PushButton" X="100" Y="55" Width="60" Height="20"
+                 Default="yes" Text="是">
+          <Publish Event="EndDialog" Value="Exit" />
+        </Control>
+        <Control Id="NoBtn" Type="PushButton" X="170" Y="55" Width="60" Height="20" Text="否">
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+      </Dialog>
+
+      <!-- 完成 / 取消 / 失败 -->
+      <Dialog Id="ExitDialog" Width="440" Height="130" Title="[ProductName] 安装程序">
+        <Control Id="DoneText" Type="Text" X="20" Y="30" Width="400" Height="24"
+                 Text="TaoPad 安装完成，桌面或开始菜单即可打开。" />
+        <Control Id="FinishBtn" Type="PushButton" X="350" Y="95" Width="70" Height="22"
+                 Default="yes" Text="完成">
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+      </Dialog>
+      <Dialog Id="UserExitDlg" Width="440" Height="130" Title="[ProductName] 安装程序">
+        <Control Id="UserExitText" Type="Text" X="20" Y="30" Width="400" Height="24"
+                 Text="安装已取消，本机未做任何更改。" />
+        <Control Id="FinishBtn" Type="PushButton" X="350" Y="95" Width="70" Height="22"
+                 Default="yes" Text="完成">
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+      </Dialog>
+      <Dialog Id="FatalErrorDlg" Width="440" Height="130" Title="[ProductName] 安装程序">
+        <Control Id="ErrorText" Type="Text" X="20" Y="30" Width="400" Height="24"
+                 Text="安装未完成，请重试或联系开发者。" />
+        <Control Id="FinishBtn" Type="PushButton" X="350" Y="95" Width="70" Height="22"
+                 Default="yes" Text="完成">
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+      </Dialog>
+
+      <InstallUISequence>
+        <CostFinalize Sequence="950" />
+        <Show Dialog="MainDlg" Sequence="1250" />
+        <Show Dialog="ProgressDlg" Before="ExecuteAction" />
+        <Show Dialog="ExitDialog" OnExit="success" />
+        <Show Dialog="UserExitDlg" OnExit="cancel" />
+        <Show Dialog="FatalErrorDlg" OnExit="error" />
+      </InstallUISequence>
+    </UI>
+
+    <!-- 桌面文件夹（快捷方式目标位置） -->
+    <StandardDirectory Id="DesktopFolder" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="TaoPad">
+
+        <!-- ProgId：TaoPad 文件类型注册（随主程序安装） -->
+        <Component Id="ProgIdReg" Guid="7C3A9E14-52B8-4F61-A0D2-8E4B6C7D9F01">
+          <RegistryValue Root="HKCR" Key="TaoPad.TextFile"
+                         Value="TaoPad Document" Type="string" KeyPath="yes" />
+          <RegistryValue Root="HKCR" Key="TaoPad.TextFile\DefaultIcon"
+                         Value="[INSTALLFOLDER]TaoPad.exe,0" Type="string" />
+          <RegistryValue Root="HKCR" Key="TaoPad.TextFile\shell\open\command"
+                         Value="&quot;[INSTALLFOLDER]TaoPad.exe&quot; &quot;%1&quot;" Type="string" />
+        </Component>
+
+        <!-- 以下每个组件是一个可选的文件关联功能（不带 Name 即写键的默认值） -->
+        <Component Id="AssocTxt" Guid="1A2B3C4D-5E6F-4A01-8B02-C3D4E5F60101">
+          <RegistryValue Root="HKCR" Key=".txt" Value="TaoPad.TextFile" Type="string" KeyPath="yes" />
+          <RegistryValue Root="HKCR" Key=".txt\OpenWithProgids" Name="TaoPad.TextFile" Value="" Type="string" />
+        </Component>
+        <Component Id="AssocMd" Guid="1A2B3C4D-5E6F-4A01-8B02-C3D4E5F60102">
+          <RegistryValue Root="HKCR" Key=".md" Value="TaoPad.TextFile" Type="string" KeyPath="yes" />
+          <RegistryValue Root="HKCR" Key=".md\OpenWithProgids" Name="TaoPad.TextFile" Value="" Type="string" />
+        </Component>
+        <Component Id="AssocJson" Guid="1A2B3C4D-5E6F-4A01-8B02-C3D4E5F60103">
+          <RegistryValue Root="HKCR" Key=".json" Value="TaoPad.TextFile" Type="string" KeyPath="yes" />
+          <RegistryValue Root="HKCR" Key=".json\OpenWithProgids" Name="TaoPad.TextFile" Value="" Type="string" />
+        </Component>
+        <Component Id="AssocXml" Guid="1A2B3C4D-5E6F-4A01-8B02-C3D4E5F60104">
+          <RegistryValue Root="HKCR" Key=".xml" Value="TaoPad.TextFile" Type="string" KeyPath="yes" />
+          <RegistryValue Root="HKCR" Key=".xml\OpenWithProgids" Name="TaoPad.TextFile" Value="" Type="string" />
+        </Component>
+        <Component Id="AssocHtml" Guid="1A2B3C4D-5E6F-4A01-8B02-C3D4E5F60105">
+          <RegistryValue Root="HKCR" Key=".html" Value="TaoPad.TextFile" Type="string" KeyPath="yes" />
+          <RegistryValue Root="HKCR" Key=".html\OpenWithProgids" Name="TaoPad.TextFile" Value="" Type="string" />
+        </Component>
+        <Component Id="AssocCs" Guid="1A2B3C4D-5E6F-4A01-8B02-C3D4E5F60106">
+          <RegistryValue Root="HKCR" Key=".cs" Value="TaoPad.TextFile" Type="string" KeyPath="yes" />
+          <RegistryValue Root="HKCR" Key=".cs\OpenWithProgids" Name="TaoPad.TextFile" Value="" Type="string" />
+        </Component>
+        <Component Id="AssocCpp" Guid="1A2B3C4D-5E6F-4A01-8B02-C3D4E5F60107">
+          <RegistryValue Root="HKCR" Key=".cpp" Value="TaoPad.TextFile" Type="string" KeyPath="yes" />
+          <RegistryValue Root="HKCR" Key=".cpp\OpenWithProgids" Name="TaoPad.TextFile" Value="" Type="string" />
+          <RegistryValue Root="HKCR" Key=".h" Value="TaoPad.TextFile" Type="string" />
+          <RegistryValue Root="HKCR" Key=".h\OpenWithProgids" Name="TaoPad.TextFile" Value="" Type="string" />
+        </Component>
+        <Component Id="AssocPy" Guid="1A2B3C4D-5E6F-4A01-8B02-C3D4E5F60108">
+          <RegistryValue Root="HKCR" Key=".py" Value="TaoPad.TextFile" Type="string" KeyPath="yes" />
+          <RegistryValue Root="HKCR" Key=".py\OpenWithProgids" Name="TaoPad.TextFile" Value="" Type="string" />
+        </Component>
+        <Component Id="AssocSql" Guid="1A2B3C4D-5E6F-4A01-8B02-C3D4E5F60109">
+          <RegistryValue Root="HKCR" Key=".sql" Value="TaoPad.TextFile" Type="string" KeyPath="yes" />
+          <RegistryValue Root="HKCR" Key=".sql\OpenWithProgids" Name="TaoPad.TextFile" Value="" Type="string" />
+        </Component>
+
+        <!-- 可选：桌面快捷方式 -->
+        <Component Id="DesktopShortcut" Guid="2B4C5D6E-7F80-4A92-B3C4-D5E6F7080102">
+          <RegistryValue Root="HKCU" Key="Software\TaoPad" Name="DesktopShortcut"
+                         Type="integer" Value="1" KeyPath="yes" />
+          <Shortcut Id="DeskShortcut" Directory="DesktopFolder" Name="TaoPad"
+                    Target="[INSTALLFOLDER]TaoPad.exe" WorkingDirectory="INSTALLFOLDER"
+                    Icon="TaoPadIco" />
+        </Component>
+
+        <!-- 可选：右键菜单"用 TaoPad 打开"（所有文件可用） -->
+        <Component Id="CtxMenuOpen" Guid="3C5D6E7F-8091-4BA3-C4D5-E6F708910203">
+          <RegistryValue Root="HKCR" Key="*\shell\TaoPad" Name="MUIVerb"
+                         Value="用 TaoPad 打开" Type="string" KeyPath="yes" />
+          <RegistryValue Root="HKCR" Key="*\shell\TaoPad" Name="Icon"
+                         Value="[INSTALLFOLDER]TaoPad.exe,0" Type="string" />
+          <RegistryValue Root="HKCR" Key="*\shell\TaoPad\command"
+                         Value="&quot;[INSTALLFOLDER]TaoPad.exe&quot; &quot;%1&quot;" Type="string" />
+        </Component>
+
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Core" Title="TaoPad 主程序" Description="编辑器本体与运行时文件（必装）"
+             Level="1" AllowAbsent="no">
+      <ComponentGroupRef Id="PublishComponents" />
+      <ComponentRef Id="ProgIdReg" />
+    </Feature>
+
+    <Feature Id="AssocTxt" Title="关联 .txt 文本文件" Level="1">
+      <ComponentRef Id="AssocTxt" />
+    </Feature>
+    <Feature Id="AssocMd" Title="关联 .md Markdown" Level="1">
+      <ComponentRef Id="AssocMd" />
+    </Feature>
+    <Feature Id="AssocJson" Title="关联 .json" Level="1">
+      <ComponentRef Id="AssocJson" />
+    </Feature>
+    <Feature Id="AssocXml" Title="关联 .xml" Level="1">
+      <ComponentRef Id="AssocXml" />
+    </Feature>
+    <Feature Id="AssocHtml" Title="关联 .html" Level="1">
+      <ComponentRef Id="AssocHtml" />
+    </Feature>
+    <Feature Id="AssocCs" Title="关联 .cs 源码" Level="1">
+      <ComponentRef Id="AssocCs" />
+    </Feature>
+    <Feature Id="AssocCpp" Title="关联 .cpp/.h 源码" Level="1">
+      <ComponentRef Id="AssocCpp" />
+    </Feature>
+    <Feature Id="AssocPy" Title="关联 .py 脚本" Level="1">
+      <ComponentRef Id="AssocPy" />
+    </Feature>
+    <Feature Id="AssocSql" Title="关联 .sql 脚本" Level="1">
+      <ComponentRef Id="AssocSql" />
+    </Feature>
+    <Feature Id="DeskShortcutF" Title="创建桌面快捷方式" Description="在桌面创建 TaoPad 快捷方式" Level="1">
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+    <Feature Id="CtxMenuF" Title="右键菜单：用 TaoPad 打开文件" Description="在任意文件的右键菜单加入打开入口" Level="1">
+      <ComponentRef Id="CtxMenuOpen" />
+    </Feature>
+
+  </Package>
+
+  <!-- 主程序文件：从 dotnet publish 输出目录整目录打包 -->
+  <Fragment>
+    <ComponentGroup Id="PublishComponents">
+      <Files Include="$(PublishDir)\**" Directory="INSTALLFOLDER" />
+    </ComponentGroup>
+  </Fragment>
+</Wix>

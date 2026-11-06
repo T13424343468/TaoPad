@@ -1,0 +1,114 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- 天青 —— 天青釉底浅调（主题三象之一，2026-11-06 全系 PC 天青统一）：底 #EDF2EF（G>B>R）、卡片 #FAFCFA、
+       墨青文字 #2B3A36、次要 #64746E、描边 #8FA39A（较 TaoAgent #C7D2CB 加深一档过 WCAG 描边 2.0）、点缀 #2C534C（较
+       #34655C 深一档过三象点缀互异 ≥1.5，TaoDown 同款偏差处置）。色板唯一来源见 Services/ThemeRule.cs 注释，O2/S4 把关 -->
+  <SolidColorBrush x:Key="Ant.Bg" Color="#EDF2EF"/>
+  <SolidColorBrush x:Key="Ant.Surface" Color="#FAFCFA"/>
+  <SolidColorBrush x:Key="LayerFillColorDefaultBrush" Color="#FAFCFA"/>
+  <SolidColorBrush x:Key="Ant.ScrollThumb" Color="#66535E58"/>
+  <SolidColorBrush x:Key="Ant.ScrollThumbHover" Color="#99535E58"/>
+  <SolidColorBrush x:Key="Ant.Border" Color="#8FA39A"/>
+  <SolidColorBrush x:Key="Ant.Text" Color="#2B3A36"/>
+  <SolidColorBrush x:Key="Ant.Text2" Color="#64746E"/>
+  <SolidColorBrush x:Key="Ant.SubText" Color="#64746E"/>
+  <SolidColorBrush x:Key="Ant.Accent" Color="#2C534C"/>
+  <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#2C534C"/>
+
+  <!-- 编辑器 -->
+  <SolidColorBrush x:Key="Ant.EdBg" Color="#FAFCFA"/>
+  <SolidColorBrush x:Key="Ant.EdText" Color="#1C242C"/>
+  <SolidColorBrush x:Key="Ant.GutterBg" Color="#EDF2EF"/>
+  <SolidColorBrush x:Key="Ant.GutterText" Color="#9AA8A1"/>
+  <SolidColorBrush x:Key="Ant.CurLine" Color="#F3F8F4"/>
+  <SolidColorBrush x:Key="Ant.Caret" Color="#2C534C"/>
+  <SolidColorBrush x:Key="Ant.SelBg" Color="#BFE0D6"/>
+  <SolidColorBrush x:Key="Ant.MatchBg" Color="#FFF3B8"/>
+
+  <!-- 语法配色（VS 浅色风格；S5 浅底系同色号 12 键与水墨全等，不随天青换装） -->
+  <SolidColorBrush x:Key="Ant.TokKeyword" Color="#0F4C9E"/>
+  <SolidColorBrush x:Key="Ant.TokControl" Color="#2C3E50"/>
+  <SolidColorBrush x:Key="Ant.TokString" Color="#7A4A00"/>
+  <SolidColorBrush x:Key="Ant.TokComment" Color="#4E5862"/>
+  <SolidColorBrush x:Key="Ant.TokDocComment" Color="#3E4852"/>
+  <SolidColorBrush x:Key="Ant.TokNumber" Color="#5C4A00"/>
+  <SolidColorBrush x:Key="Ant.TokType" Color="#0B3D6B"/>
+  <SolidColorBrush x:Key="Ant.TokPreproc" Color="#46525C"/>
+  <SolidColorBrush x:Key="Ant.TokTag" Color="#14508A"/>
+  <SolidColorBrush x:Key="Ant.TokAttr" Color="#34506B"/>
+  <SolidColorBrush x:Key="Ant.TokHeading" Color="#1C242C"/>
+
+
+  <!-- TabView 主题资源（应用级定义，避免控件模板内查找失败） -->
+  <SolidColorBrush x:Key="TabViewBackground" Color="#EDF2EF"/>
+  <SolidColorBrush x:Key="TabViewBorderBrush" Color="#8FA39A"/>
+  <SolidColorBrush x:Key="TabViewItemBorderBrush" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewItemSeparator" Color="#8FA39A"/>
+  <SolidColorBrush x:Key="TabViewSelectedItemBorderBrush" Color="#2C534C"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderBackground" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPointerOver" Color="#EDF2EF"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPressed" Color="#EDF2EF"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="#FAFCFA"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderBackgroundDisabled" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderForeground" Color="#2B3A36"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderForegroundPointerOver" Color="#2B3A36"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderForegroundPressed" Color="#2B3A36"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderForegroundSelected" Color="#2C534C"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderForegroundDisabled" Color="#64746E"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderDragBackground" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewItemIconForeground" Color="#64746E"/>
+  <SolidColorBrush x:Key="TabViewItemIconForegroundPointerOver" Color="#2B3A36"/>
+  <SolidColorBrush x:Key="TabViewItemIconForegroundPressed" Color="#2B3A36"/>
+  <SolidColorBrush x:Key="TabViewItemIconForegroundSelected" Color="#2C534C"/>
+  <SolidColorBrush x:Key="TabViewItemIconForegroundDisabled" Color="#64746E"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderCloseButtonBackground" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderCloseButtonBackgroundPointerOver" Color="#EDF2EF"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderCloseButtonBackgroundPressed" Color="#8FA39A"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderCloseButtonBorderBrush" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderCloseButtonBorderBrushPointerOver" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderCloseButtonBorderBrushPressed" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderCloseButtonBorderBrushSelected" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderCloseButtonBorderBrushDisabled" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderCloseButtonForeground" Color="#64746E"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderCloseButtonForegroundPointerOver" Color="#2B3A36"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderCloseButtonForegroundPressed" Color="#2B3A36"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderDisabledCloseButtonBackground" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderDisabledCloseButtonForeground" Color="#64746E"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderPointerOverCloseButtonBackground" Color="#EDF2EF"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderPointerOverCloseButtonForeground" Color="#2B3A36"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderPressedCloseButtonBackground" Color="#8FA39A"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderPressedCloseButtonForeground" Color="#2B3A36"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderSelectedCloseButtonBackground" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewItemHeaderSelectedCloseButtonForeground" Color="#2B3A36"/>
+  <SolidColorBrush x:Key="TabViewButtonBackground" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewButtonBackgroundActiveTab" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewButtonBackgroundDisabled" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewScrollButtonBackground" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewScrollButtonBackgroundDisabled" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewButtonBackgroundPointerOver" Color="#EDF2EF"/>
+  <SolidColorBrush x:Key="TabViewButtonBackgroundPressed" Color="#8FA39A"/>
+  <SolidColorBrush x:Key="TabViewScrollButtonBackgroundPointerOver" Color="#EDF2EF"/>
+  <SolidColorBrush x:Key="TabViewScrollButtonBackgroundPressed" Color="#8FA39A"/>
+  <SolidColorBrush x:Key="TabViewButtonBorderBrush" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewButtonBorderBrushDisabled" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewButtonBorderBrushPointerOver" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewButtonBorderBrushPressed" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewScrollButtonBorderBrush" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewScrollButtonBorderBrushDisabled" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewScrollButtonBorderBrushPointerOver" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewScrollButtonBorderBrushPressed" Color="#00FFFFFF"/>
+  <SolidColorBrush x:Key="TabViewButtonForeground" Color="#64746E"/>
+  <SolidColorBrush x:Key="TabViewButtonForegroundActiveTab" Color="#64746E"/>
+  <SolidColorBrush x:Key="TabViewButtonForegroundPointerOver" Color="#2B3A36"/>
+  <SolidColorBrush x:Key="TabViewButtonForegroundPressed" Color="#2B3A36"/>
+  <SolidColorBrush x:Key="TabViewButtonForegroundDisabled" Color="#64746E"/>
+  <SolidColorBrush x:Key="TabViewScrollButtonForeground" Color="#64746E"/>
+  <SolidColorBrush x:Key="TabViewScrollButtonForegroundPointerOver" Color="#2B3A36"/>
+  <SolidColorBrush x:Key="TabViewScrollButtonForegroundPressed" Color="#2B3A36"/>
+  <SolidColorBrush x:Key="TabViewScrollButtonForegroundDisabled" Color="#64746E"/>
+  <Thickness x:Key="TabViewButtonBorderThickness">0</Thickness>
+  <Thickness x:Key="TabViewItemHeaderCloseButtonBorderThickness">0</Thickness>
+</ResourceDictionary>

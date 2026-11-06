@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <RootNamespace>AntPad</RootNamespace>
+    <AssemblyName>TaoPad</AssemblyName>
+    <ApplicationIcon>Assets\TaoPad.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x86;x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
+    <UseWinUI>true</UseWinUI>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <DefaultLanguage>zh-CN</DefaultLanguage>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Version>1.0.9</Version>
+    <FileVersion>1.0.9</FileVersion>
+    <InformationalVersion>1.0.9</InformationalVersion>
+    <Product>TaoPad</Product>
+    <Company>Tao</Company>
+    <Copyright>Copyright (c) 2026</Copyright>
+    <EnableDefaultXamlItems>true</EnableDefaultXamlItems>
+    <!-- NETSDK1206：WindowsAppSDK 1.5 仍以 win10-* 提供运行时资产，.NET 8 对此
+         本就按原样解析、行为不受影响，官方建议可安全忽略；显式压掉保持零警告构建 -->
+    <NoWarn>$(NoWarn);NETSDK1206</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.5.240802000" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\TaoPad.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\TaoPad.ico" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="app.manifest" />
+  </ItemGroup>
+
+</Project>
