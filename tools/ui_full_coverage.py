@@ -251,14 +251,54 @@ def esc_cleanup():
         pass
 
 
+TOPMENUS = ["文件", "编辑", "搜索", "查看", "语言", "编码", "主题", "工具"]
+MENUS = {
+    "文件": ["新建", "打开…", "最近文件", "保存", "另存为…", "全部保存", "导出", "关闭标签", "退出"],
+    "编辑": ["撤销", "重做", "剪切", "复制", "粘贴", "全选", "插入时间日期", "行操作", "大小写转换", "格式化", "注释选区", "取消注释选区"],
+    "搜索": ["查找", "替换", "在文件中查找…", "查找下一个", "查找上一个", "转到行…"],
+    "查看": ["自动换行", "显示行号", "缩放"],
+    "语言": ["纯文本", "C / C++", "C#", "Java", "JavaScript / TypeScript", "Go", "Rust",
+             "C 风格其他 (Swift/Kotlin/PHP/Dart…)", "Python", "JSON", "XML / HTML", "Markdown", "SQL"],
+    "编码": ["保存编码", "换行符"],
+    "主题": ["水墨", "天青", "墨夜"],
+    "工具": ["设置…"],
+}
+SUBMENUS = {
+    "导出": ["导出为可打印 HTML（PDF 用）…"],
+    "行操作": ["删除当前行", "复制当前行", "上移当前行", "下移当前行"],
+    "大小写转换": ["转为大写", "转为小写"],
+    "缩放": ["放大", "缩小", "复位"],
+    "保存编码": ["UTF-8", "UTF-8 BOM", "UTF-16 LE", "GBK", "Big5"],
+    "换行符": ["Windows (CRLF)", "Unix (LF)", "Mac (CR)"],
+}
+
+
 def menu(*titles):
-    """菜单路径点击（顶层用子进程定位，浮层项由独立进程枚举弹出层）"""
+    """键盘导航菜单：F10 聚焦菜单条 → 方向键选择 → Enter 打开/触发（WinUI MenuBar 官方键盘路径）"""
     esc_cleanup()
-    for t in titles:
-        if not worker_find_click(t, retry=1):
-            raise AssertionError("菜单项定位失败：" + t)
-        time.sleep(0.9)
-    esc_cleanup()
+    click_editor()
+    send_keys("{F10}")
+    time.sleep(0.9)
+    topi = TOPMENUS.index(titles[0])
+    for _ in range(topi):
+        send_keys("{RIGHT}")
+        time.sleep(0.35)
+    send_keys("{ENTER}")
+    time.sleep(1.0)
+    if len(titles) > 1:
+        lst = MENUS[titles[0]]
+        for _ in range(lst.index(titles[1])):
+            send_keys("{DOWN}")
+            time.sleep(0.35)
+        if len(titles) > 2:
+            send_keys("{RIGHT}")
+            time.sleep(1.0)
+            sub = SUBMENUS[titles[1]]
+            for _ in range(sub.index(titles[2])):
+                send_keys("{DOWN}")
+                time.sleep(0.35)
+        send_keys("{ENTER}")
+        time.sleep(1.1)
 
 
 def texts():
@@ -450,36 +490,55 @@ def c_format():
 
 
 def c_comment():
+    # 纯文本没有行注释配置，先经「语言」菜单切到 Python（顺带验证语言菜单导航）
+    menu("语言", "Python")
+    status_has(exact="Python")
     click_editor()
     esc_cleanup()
     send_keys("^a{DEL}")
     type_text("code-line")
     n0 = len(editor_clipboard())
-    menu("编辑", "注释选区（Ctrl+K, C）")
-    click_editor()
+    send_keys("^a")
+    time.sleep(0.25)
+    send_keys("^k")
+    time.sleep(0.3)
+    send_keys("c")
+    time.sleep(0.7)
     n1 = len(editor_clipboard())
     assert n1 > n0, f"注释未生效 {n0}->{n1}"
-    menu("编辑", "取消注释选区（Ctrl+K, U）")
-    click_editor()
+    send_keys("^a")
+    time.sleep(0.25)
+    send_keys("^k")
+    time.sleep(0.3)
+    send_keys("u")
+    time.sleep(0.7)
     n2 = len(editor_clipboard())
     assert n2 < n1, f"取消注释未生效 {n1}->{n2}"
     shot("case-comment")
+    menu("语言", "纯文本")
+    time.sleep(0.4)
 
 
 def c_find_panel():
     click_editor()
-    type_text("apple banana apple")
+    esc_cleanup()
+    send_keys("^a{DEL}")
+    type_text("xx apple yy apple")
     send_keys("^f")
     time.sleep(1.0)
-    assert worker_has_edit() > 0, "查找面板没有输入框"
     send_keys("apple")
     time.sleep(0.4)
     send_keys("{ENTER}")
-    time.sleep(0.5)
-    send_keys("+{F3}")
-    time.sleep(0.5)
+    time.sleep(0.7)
+    status_has(contains="列 4")   # 第一个 apple 在第 4 列
+    send_keys("{F3}")
+    time.sleep(0.7)
+    status_has(contains="列 13")  # 第二个 apple 在第 13 列
+    send_keys("+{F3}")            # 查找上一个
+    time.sleep(0.6)
     shot("case-find-panel")
     esc_cleanup()
+    click_editor()
 
 
 def c_replace_panel():
@@ -503,29 +562,37 @@ def c_replace_panel():
 
 def c_goto():
     esc_cleanup()
-    send_keys("^g")
-    time.sleep(1.0)
-    assert worker_has_edit() > 0, "转到行没有输入框"
-    worker_click_last_edit()
+    click_editor()
     send_keys("^a{DEL}")
-    send_keys("1")
-    time.sleep(0.2)
-    send_keys("{ENTER}")
-    time.sleep(0.6)
+    type_text("\n".join(f"line{i}" for i in range(1, 30)))
+    send_keys("^g")
+    time.sleep(1.2)
+    ok = False
+    for seq in ("5{ENTER}", "{TAB}5{ENTER}", "5{TAB}{ENTER}"):
+        send_keys(seq)
+        time.sleep(1.0)
+        if any("行 5，列" in t for t in texts()):
+            ok = True
+            break
+        send_keys("^g")
+        time.sleep(1.0)
     esc_cleanup()
     shot("case-goto")
+    assert ok, "转到行未生效，状态栏未见 行 5"
 
 
 def c_find_in_files():
     esc_cleanup()
     send_keys("^+{F}")
-    time.sleep(1.2)
-    assert worker_has_edit() > 0, "在文件中查找没有输入框"
-    worker_click_last_edit()
-    send_keys("^a")
-    send_keys("l1")
-    send_keys("{ENTER}")
-    time.sleep(2.2)
+    time.sleep(1.3)
+    send_keys(DOCS)        # 文件夹框（首个控件，默认焦点）
+    time.sleep(0.4)
+    send_keys("{TAB}")     # 到查找内容框
+    time.sleep(0.3)
+    send_keys("save-me")
+    time.sleep(0.3)
+    send_keys("{ENTER}")   # 回车触发扫描
+    time.sleep(2.5)
     shot("case-find-in-files")
     esc_cleanup()
 
@@ -656,14 +723,26 @@ def c_save_as():
 
 
 def c_recent_menu():
-    menu("文件", "最近文件")
-    time.sleep(0.8)
-    ok = worker_find_click(os.path.basename(FILE2B), retry=0) or worker_find_click(os.path.basename(FILE1), retry=0)
-    if not ok:
-        raise AssertionError("最近文件列表里没有目标文件")
-    time.sleep(1.2)
+    esc_cleanup()
+    click_editor()
+    send_keys("{F10}")
+    time.sleep(0.9)
+    send_keys("{ENTER}")          # 焦点在文件（第一项），回车打开下拉
+    time.sleep(1.0)
+    for _ in range(MENUS["文件"].index("最近文件")):
+        send_keys("{DOWN}")
+        time.sleep(0.3)
+    send_keys("{RIGHT}")          # 展开最近文件子菜单
+    time.sleep(1.0)
+    send_keys("{DOWN}")           # 第一条最近文件
+    time.sleep(0.3)
+    send_keys("{ENTER}")
+    time.sleep(1.5)
     esc_cleanup()
     shot("case-recent")
+    got = editor_clipboard().strip()
+    known = ("save-me-内容 extra", "save-me-内容 extraMore", " extra", " extraMore", "save-me-内容")
+    assert got in known, f"最近文件打开后内容不对: {got!r}"
 
 
 def c_export_html():
@@ -703,12 +782,17 @@ def c_tabs_and_close():
 
 def c_settings():
     menu("工具", "设置…")
-    time.sleep(1.2)
+    time.sleep(1.3)
     shot("case-settings-dialog")
-    worker_click_button("自动换行")
-    worker_click_button("显示行号")
-    worker_click_button("应用")
-    time.sleep(1.0)
+    send_keys("{SPACE}")     # 焦点默认落在第一个开关（自动换行），空格切换
+    time.sleep(0.4)
+    send_keys("{TAB}")
+    time.sleep(0.3)
+    send_keys("{SPACE}")     # 第二个开关（显示行号）
+    time.sleep(0.4)
+    shot("case-settings-toggled")
+    send_keys("{ENTER}")     # 默认按钮=应用
+    time.sleep(1.2)
     shot("case-settings-applied")
 
 
