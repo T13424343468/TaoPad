@@ -1,19 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-TaoPad 云端真机全功能界面自动化（v3）
-覆盖范围（对照源码 MainWindow.xaml 全部菜单与命令）：
-  文件：新建/打开/最近文件/保存/另存为/全部保存/导出可打印HTML/关闭标签/退出
-  编辑：撤销/重做/剪切/复制/粘贴/全选/插入时间日期/删除行/复制行/上移行/下移行/
-        转大写/转小写/格式化/注释/取消注释
-  搜索：查找/替换/在文件中查找/查找下一个/查找上一个/转到行
-  查看：自动换行/显示行号/缩放(放大/缩小/复位)
-  语言：13 种语法高亮语言逐一切换
-  编码：5 种保存编码 + 3 种换行符
-  主题：水墨/天青/墨夜
-  工具：设置(换行开关/行号开关/主题下拉/应用)
-  标签页：新增/切换/关闭
-  状态栏：行/列/选中/字符/行数/缩放/编码/换行符/语言 逐项断言
-每步截图；结果写 ui-evidence/report.json；任一失败进程退出码非 0。
+TaoPad 云端真机全功能界面自动化（v5，子进程隔离版）
+每次界面元素枚举/点击都在独立 Python 子进程里完成——
+WinUI 菜单浮层曾把主进程的 COM/UIA 状态拖瘫（v1-v4 的根因），
+子进程天生免疫。键盘/剪贴板/截图仍在主进程。
+覆盖：文件9/编辑16/搜索6/查看3组/语言13/编码5+3/主题3/设置/标签页/状态栏。
 """
 import json
 import os
@@ -27,7 +18,6 @@ EVID = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 os.makedirs(EVID, exist_ok=True)
 
 from PIL import ImageGrab
-from pywinauto import Application, Desktop
 from pywinauto.keyboard import send_keys
 import pyperclip
 
@@ -38,16 +28,154 @@ FILE2B = os.path.join(DOCS, "taopad-it3.txt")
 HTML_OUT = os.path.join(DOCS, "taopad-export.html")
 
 RESULTS = []
-
-# 窗口句柄重连：WinUI 弹层打开时窗口可能短暂不可见/标题解析失效，
-# 一律按句柄取新包装，避免界面枚举整体失灵
 WIN_HANDLE = None
 
+# ---------------- 子进程工作器 ----------------
 
-def cur_win():
-    app = Application(backend="uia").connect(handle=WIN_HANDLE)
-    return app.window(handle=WIN_HANDLE)
+def worker_run(argv):
+    """独立进程做 UIA 操作，返回 stdout 字符串"""
+    exe = sys.executable
+    out = subprocess.run([exe, os.path.abspath(__file__), "__worker"] + argv,
+                         capture_output=True, text=True, encoding="utf-8", errors="replace",
+                         timeout=90)
+    return out.stdout + out.stderr
 
+
+def worker_texts():
+    out = worker_run(["read_texts", str(WIN_HANDLE)])
+    m = re.search(r"TEXTS (.*)", out)
+    if m:
+        try:
+            return json.loads(m.group(1))
+        except Exception:
+            return []
+    print("worker read_texts 失败:", out[:200], flush=True)
+    return []
+
+
+def worker_find_click(title, retry=1):
+    for attempt in range(retry + 1):
+        out = worker_run(["find_click", title])
+        if "OK" in out:
+            return True
+        if attempt < retry:
+            send_keys("{ESC}")
+            time.sleep(0.5)
+            # 关掉残留浮层后重开由调用方负责
+    print(f"worker find_click 未找到[{title}]:", out[:200], flush=True)
+    return False
+
+
+def worker_has_edit():
+    out = worker_run(["has_edit", str(WIN_HANDLE)])
+    m = re.search(r"EDIT (\d+)", out)
+    return int(m.group(1)) if m else -1
+
+
+def worker_click_last_edit():
+    return "OK" in worker_run(["click_last_edit", str(WIN_HANDLE)])
+
+
+def worker_click_button(name):
+    return "OK" in worker_run(["click_button", name])
+
+
+def worker_dump():
+    out = worker_run(["dump", str(WIN_HANDLE)])
+    for line in out.splitlines():
+        if line.startswith(("EL", "MENU", "DUMPERR")):
+            print(line, flush=True)
+
+
+# ---------------- 子进程入口 ----------------
+
+def worker_main(argv):
+    from pywinauto import Application, Desktop
+    mode = argv[0]
+    if mode == "find_click":
+        title = argv[1]
+        for w in Desktop(backend="uia").windows():
+            try:
+                for d in w.descendants():
+                    try:
+                        if (d.window_text() or "").strip() == title:
+                            try:
+                                d.invoke()
+                            except Exception:
+                                d.click_input()
+                            print("OK")
+                            return
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        print("NOTFOUND")
+    elif mode == "read_texts":
+        h = int(argv[1])
+        app = Application(backend="uia").connect(handle=h)
+        win = app.window(handle=h)
+        names = [d.window_text() for d in win.descendants(control_type="Text") if (d.window_text() or "").strip()]
+        print("TEXTS", json.dumps(names, ensure_ascii=False))
+    elif mode == "has_edit":
+        h = int(argv[1])
+        app = Application(backend="uia").connect(handle=h)
+        win = app.window(handle=h)
+        print("EDIT", len(win.descendants(control_type="Edit")))
+    elif mode == "click_last_edit":
+        h = int(argv[1])
+        app = Application(backend="uia").connect(handle=h)
+        win = app.window(handle=h)
+        edits = win.descendants(control_type="Edit")
+        if not edits:
+            print("NONE")
+            return
+        edits[-1].click_input()
+        print("OK")
+    elif mode == "click_button":
+        name = argv[1]
+        for w in Desktop(backend="uia").windows():
+            try:
+                for d in w.descendants(control_type="Button"):
+                    try:
+                        if (d.window_text() or "").strip() == name:
+                            d.click_input()
+                            print("OK")
+                            return
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        print("NOTFOUND")
+    elif mode == "dump":
+        h = int(argv[1])
+        app = Application(backend="uia").connect(handle=h)
+        win = app.window(handle=h)
+        n = 0
+        for d in win.descendants():
+            try:
+                t = (d.window_text() or "").strip()
+                ct = d.element_info.control_type
+                if t or ct in ("MenuItem", "MenuFlyoutItem", "ToggleMenuFlyoutItem"):
+                    print("EL", ct, "|", t[:60])
+            except Exception:
+                continue
+        menu_titles = ["文件", "编辑", "搜索", "查看", "语言", "编码", "主题", "工具"]
+        found = []
+        for t in menu_titles:
+            hit = False
+            for d in win.descendants(control_type="MenuItem"):
+                try:
+                    if (d.window_text() or "").strip() == t:
+                        hit = True
+                        break
+                except Exception:
+                    continue
+            if hit:
+                found.append(t)
+        print("MENU-TITLES 可见:", found)
+
+
+# ---------------- 主进程工具 ----------------
 
 def shot(name):
     p = os.path.join(EVID, name + ".png")
@@ -113,46 +241,7 @@ def find_exe():
     raise RuntimeError("找不到 TaoPad.exe")
 
 
-def _safe_descendants(w):
-    try:
-        for d in w.descendants():
-            yield d
-    except Exception:
-        pass
-
-
-def _iter_candidates(win=None):
-    """主窗口 + 全部顶层弹窗/弹出层（菜单浮层是独立 HWND）"""
-    try:
-        win = cur_win()
-    except Exception:
-        return
-    yield from _safe_descendants(win)
-    try:
-        for w in Desktop(backend="uia").windows():
-            try:
-                if w.handle == WIN_HANDLE:
-                    continue
-            except Exception:
-                pass
-            yield from _safe_descendants(w)
-    except Exception:
-        pass
-
-
-def find_el(title, contains=False, win=None):
-    for d in _iter_candidates():
-        try:
-            t = (d.window_text() or "").strip()
-            if (t == title) if not contains else (title in t):
-                return d
-        except Exception:
-            continue
-    return None
-
-
 def esc_cleanup():
-    """关掉可能残留的菜单浮层/对话框，焦点还给编辑区"""
     try:
         send_keys("{ESC}")
         time.sleep(0.25)
@@ -163,65 +252,41 @@ def esc_cleanup():
 
 
 def menu(*titles):
-    """点击菜单路径，如 menu('编码','保存编码','GBK')"""
+    """菜单路径点击（顶层用子进程定位，浮层项由独立进程枚举弹出层）"""
     esc_cleanup()
-    top = find_el(titles[0])
-    if top is None:
-        raise AssertionError("找不到顶层菜单：" + titles[0])
-    top.click_input()
-    time.sleep(0.8)
-    for t in titles[1:]:
-        el = find_el(t)
-        if el is None:
-            # 重试一次：先关浮层再打开
-            esc_cleanup()
-            top2 = find_el(titles[0])
-            top2.click_input()
-            time.sleep(0.8)
-            el = find_el(t)
-            if el is None:
-                raise AssertionError("找不到菜单项：" + t)
-        try:
-            el.invoke()
-        except Exception:
-            el.click_input()
-        time.sleep(0.8)
+    for t in titles:
+        if not worker_find_click(t, retry=1):
+            raise AssertionError("菜单项定位失败：" + t)
+        time.sleep(0.9)
     esc_cleanup()
 
 
-def texts(win=None):
-    try:
-        win = cur_win()
-    except Exception:
-        return []
-    out = []
-    try:
-        for d in win.descendants(control_type="Text"):
-            t = d.window_text()
-            if t:
-                out.append(t)
-    except Exception:
-        pass
-    return out
+def texts():
+    return worker_texts()
 
 
-def status_has(win=None, exact=None, contains=None):
-    ts = texts(win)
+def status_has(exact=None, contains=None):
+    ts = texts()
     if exact is not None and not any(t.strip() == exact for t in ts):
-        raise AssertionError(f"状态栏没有精确项[{exact}]，当前文本项: {ts[:20]}")
+        raise AssertionError(f"状态栏没有精确项[{exact}]，当前: {ts[:20]}")
     if contains is not None and not any(contains in t for t in ts):
-        raise AssertionError(f"状态栏没有包含[{contains}]，当前文本项: {ts[:20]}")
+        raise AssertionError(f"状态栏没有包含[{contains}]，当前: {ts[:20]}")
 
 
-def click_editor(win=None):
-    """把焦点还给编辑区（点编辑区中部）"""
-    win = cur_win()
+def click_editor():
+    h = WIN_HANDLE
     try:
-        win.click_input(coords=(win.rectangle().width() // 2, int(win.rectangle().height() * 0.62)))
+        import win32gui  # noqa
+        rect = win32gui.GetWindowRect(h)
     except Exception:
-        rect = win.rectangle()
-        ctypes.windll.user32.SetCursorPos(int((rect.left + rect.right) / 2), int(rect.top + (rect.bottom - rect.top) * 0.62))
-    time.sleep(0.3)
+        rect = None
+    if rect:
+        x = int((rect[0] + rect[2]) / 2)
+        y = int(rect[1] + (rect[3] - rect[1]) * 0.62)
+        ctypes.windll.user32.SetCursorPos(x, y)
+        ctypes.windll.user32.mouse_event(2, 0, 0, 0, 0)
+        ctypes.windll.user32.mouse_event(4, 0, 0, 0, 0)
+        time.sleep(0.3)
 
 
 def type_text(s):
@@ -240,33 +305,25 @@ def editor_clipboard():
 
 
 def picker_typing(path, wait=3.0):
-    """系统文件选择器打开后文件名框默认有焦点：键入完整路径回车；处理『已存在是否替换』确认框"""
     time.sleep(wait)
     send_keys(path, with_spaces=True)
     time.sleep(0.5)
     send_keys("{ENTER}")
     time.sleep(1.5)
-    # 替换确认框：找 Yes/是 按钮
-    for _ in range(3):
-        yes = None
+    # 已存在替换确认框：键入回车默认=是
+    for _ in range(2):
         try:
-            for w in Desktop(backend="uia").windows():
-                if w.window_text() in ("Confirm Save As", "确认另存为", "Confirm Save As"):
-                    for b in w.descendants(control_type="Button"):
-                        if b.window_text() in ("Yes", "是", "&Yes"):
-                            yes = b
-                            break
-                if yes:
-                    break
+            import win32gui, win32con
+            h = win32gui.FindWindow(None, "Confirm Save As") or win32gui.FindWindow(None, "确认另存为")
+            if h:
+                win32gui.SetForegroundWindow(h)
+                time.sleep(0.3)
+                send_keys("{ENTER}")
+                time.sleep(1.2)
+                continue
         except Exception:
             pass
-        if yes is None:
-            break
-        try:
-            yes.click_input()
-        except Exception:
-            yes.invoke()
-        time.sleep(1.2)
+        break
 
 
 def wer_count():
@@ -280,21 +337,21 @@ def wer_count():
 
 # ---------------- 用例 ----------------
 
-def c_startup(win):
-    status_has(win, contains="行 1，列 1")
+def c_startup():
+    status_has(contains="行 1，列 1")
     shot("case-startup")
 
 
-def c_new_tab(win):
+def c_new_tab():
     send_keys("^n")
     time.sleep(0.9)
-    click_editor(win)
+    click_editor()
     type_text("tab2")
     shot("case-new-tab")
 
 
-def c_type_undo_redo(win):
-    click_editor(win)
+def c_type_undo_redo():
+    click_editor()
     esc_cleanup()
     send_keys("^a{DEL}")
     type_text("hello-taopad")
@@ -311,8 +368,8 @@ def c_type_undo_redo(win):
     shot("case-undo-redo")
 
 
-def c_cut_copy_paste(win):
-    click_editor(win)
+def c_cut_copy_paste():
+    click_editor()
     esc_cleanup()
     send_keys("^a{DEL}")
     type_text("copy-me-123")
@@ -330,8 +387,8 @@ def c_cut_copy_paste(win):
     shot("case-cut-copy-paste")
 
 
-def c_insert_time(win):
-    click_editor(win)
+def c_insert_time():
+    click_editor()
     send_keys("^a{DEL}")
     type_text("t:")
     before = len(editor_clipboard())
@@ -342,8 +399,8 @@ def c_insert_time(win):
     shot("case-insert-time")
 
 
-def c_line_ops(win):
-    click_editor(win)
+def c_line_ops():
+    click_editor()
     esc_cleanup()
     send_keys("^a{DEL}")
     type_text("l1\nl2\nl3\nl4")
@@ -365,8 +422,8 @@ def c_line_ops(win):
     shot("case-line-ops")
 
 
-def c_case_convert(win):
-    click_editor(win)
+def c_case_convert():
+    click_editor()
     esc_cleanup()
     send_keys("^a{DEL}")
     type_text("abc")
@@ -381,8 +438,8 @@ def c_case_convert(win):
     shot("case-case-convert")
 
 
-def c_format(win):
-    click_editor(win)
+def c_format():
+    click_editor()
     esc_cleanup()
     type_text("\ndef f(x):\n    return x\n")
     send_keys("^a")
@@ -392,30 +449,29 @@ def c_format(win):
     shot("case-format")
 
 
-def c_comment(win):
-    click_editor(win)
+def c_comment():
+    click_editor()
     esc_cleanup()
     send_keys("^a{DEL}")
     type_text("code-line")
     n0 = len(editor_clipboard())
     menu("编辑", "注释选区（Ctrl+K, C）")
-    time.sleep(0.6)
+    click_editor()
     n1 = len(editor_clipboard())
     assert n1 > n0, f"注释未生效 {n0}->{n1}"
     menu("编辑", "取消注释选区（Ctrl+K, U）")
-    time.sleep(0.6)
+    click_editor()
     n2 = len(editor_clipboard())
     assert n2 < n1, f"取消注释未生效 {n1}->{n2}"
     shot("case-comment")
 
 
-def c_find_panel(win):
-    win = cur_win()
+def c_find_panel():
+    click_editor()
     type_text("apple banana apple")
     send_keys("^f")
-    time.sleep(0.9)
-    panel_edits = list(win.descendants(control_type="Edit"))
-    assert panel_edits, "查找面板没有输入框"
+    time.sleep(1.0)
+    assert worker_has_edit() > 0, "查找面板没有输入框"
     send_keys("apple")
     time.sleep(0.4)
     send_keys("{ENTER}")
@@ -426,13 +482,13 @@ def c_find_panel(win):
     esc_cleanup()
 
 
-def c_replace_panel(win):
-    click_editor(win)
+def c_replace_panel():
+    click_editor()
     esc_cleanup()
     send_keys("^a{DEL}")
     type_text("cat cat cat")
     send_keys("^h")
-    time.sleep(0.9)
+    time.sleep(1.0)
     send_keys("cat")
     time.sleep(0.3)
     send_keys("{TAB}")
@@ -445,15 +501,12 @@ def c_replace_panel(win):
     esc_cleanup()
 
 
-def c_goto(win):
-    win = cur_win()
+def c_goto():
     esc_cleanup()
     send_keys("^g")
-    time.sleep(0.9)
-    edits = win.descendants(control_type="Edit")
-    assert edits, "转到行没有输入框"
-    edits[-1].click_input()
-    time.sleep(0.2)
+    time.sleep(1.0)
+    assert worker_has_edit() > 0, "转到行没有输入框"
+    worker_click_last_edit()
     send_keys("^a{DEL}")
     send_keys("1")
     time.sleep(0.2)
@@ -463,58 +516,51 @@ def c_goto(win):
     shot("case-goto")
 
 
-def c_find_in_files(win):
-    win = cur_win()
+def c_find_in_files():
     esc_cleanup()
     send_keys("^+{F}")
-    time.sleep(1.1)
-    edits = win.descendants(control_type="Edit")
-    assert edits, "在文件中查找没有输入框"
-    pat = [e for e in edits if e.window_text() == ""] or edits
-    try:
-        pat[-1].click_input()
-        send_keys("^a")
-        send_keys("l1")
-        send_keys("{ENTER}")
-        time.sleep(2.2)
-    except Exception:
-        pass
+    time.sleep(1.2)
+    assert worker_has_edit() > 0, "在文件中查找没有输入框"
+    worker_click_last_edit()
+    send_keys("^a")
+    send_keys("l1")
+    send_keys("{ENTER}")
+    time.sleep(2.2)
     shot("case-find-in-files")
     esc_cleanup()
 
 
-def zoom_val(win):
-    for t in texts(win):
+def zoom_val():
+    for t in texts():
         m = re.fullmatch(r"\d{2,3}%", t.strip())
         if m:
             return int(m.group(1))
-    raise AssertionError("状态栏没有缩放百分比: " + str(texts(win)[:20]))
+    raise AssertionError("状态栏没有缩放百分比: " + str(texts()[:20]))
 
 
-def c_zoom(win):
-    click_editor(win)
+def c_zoom():
+    click_editor()
     esc_cleanup()
-    z0 = zoom_val(win)
-    # 键盘快捷键（Numpad 加号）
+    z0 = zoom_val()
     send_keys("^{ADD}")
-    time.sleep(0.7)
-    z1 = zoom_val(win)
+    time.sleep(0.8)
+    z1 = zoom_val()
     assert z1 > z0, f"放大未生效 {z0}->{z1}"
     send_keys("^{ADD}")
-    time.sleep(0.7)
-    z2 = zoom_val(win)
+    time.sleep(0.8)
+    z2 = zoom_val()
     assert z2 > z1, f"放大第二次未生效 {z1}->{z2}"
     shot("case-zoom-in")
     send_keys("^{SUBTRACT}")
-    time.sleep(0.7)
-    assert zoom_val(win) < z2, "缩小未生效"
+    time.sleep(0.8)
+    assert zoom_val() < z2, "缩小未生效"
     send_keys("^0")
-    time.sleep(0.7)
-    assert zoom_val(win) == 100, f"复位未回到100%，当前{zoom_val(win)}%"
+    time.sleep(0.8)
+    assert zoom_val() == 100, f"复位未回到100%，当前{zoom_val()}%"
     shot("case-zoom-reset")
 
 
-def c_wrap_toggle(win):
+def c_wrap_toggle():
     menu("查看", "自动换行")
     time.sleep(0.4)
     shot("case-wrap-on")
@@ -523,7 +569,7 @@ def c_wrap_toggle(win):
     shot("case-wrap-off")
 
 
-def c_lineno_toggle(win):
+def c_lineno_toggle():
     menu("查看", "显示行号")
     time.sleep(0.5)
     shot("case-lineno-off")
@@ -535,7 +581,7 @@ def c_lineno_toggle(win):
 THEMES = ["水墨", "天青", "墨夜"]
 
 
-def c_themes(win):
+def c_themes():
     for i, t in enumerate(THEMES):
         menu("主题", t)
         time.sleep(0.6)
@@ -545,22 +591,22 @@ def c_themes(win):
 ENCS = ["UTF-8 BOM", "UTF-16 LE", "GBK", "Big5", "UTF-8"]
 
 
-def c_encodings(win):
+def c_encodings():
     for enc in ENCS:
         menu("编码", "保存编码", enc)
         time.sleep(0.4)
-        status_has(win, exact=enc)
+        status_has(exact=enc)
     shot("case-encodings")
 
 
 EOLS = [("Unix (LF)", "LF"), ("Mac (CR)", "CR"), ("Windows (CRLF)", "CRLF")]
 
 
-def c_eols(win):
+def c_eols():
     for title, token in EOLS:
         menu("编码", "换行符", title)
         time.sleep(0.4)
-        status_has(win, exact=token)
+        status_has(exact=token)
     shot("case-eols")
 
 
@@ -568,16 +614,16 @@ LANGS = ["纯文本", "C / C++", "C#", "Java", "JavaScript / TypeScript", "Go", 
          "C 风格其他 (Swift/Kotlin/PHP/Dart…)", "Python", "JSON", "XML / HTML", "Markdown", "SQL"]
 
 
-def c_languages(win):
+def c_languages():
     for lang in LANGS:
         menu("语言", lang)
         time.sleep(0.3)
-        status_has(win, exact=lang)
+        status_has(exact=lang)
     shot("case-languages")
 
 
-def c_save(win):
-    click_editor(win)
+def c_save():
+    click_editor()
     esc_cleanup()
     send_keys("^a{DEL}")
     type_text("save-me-内容")
@@ -588,7 +634,7 @@ def c_save(win):
     shot("case-save")
 
 
-def c_open(win):
+def c_open():
     esc_cleanup()
     send_keys("^o")
     time.sleep(0.6)
@@ -599,8 +645,8 @@ def c_open(win):
     shot("case-open")
 
 
-def c_save_as(win):
-    click_editor(win)
+def c_save_as():
+    click_editor()
     type_text(" extra")
     send_keys("^+{S}")
     time.sleep(0.6)
@@ -609,23 +655,18 @@ def c_save_as(win):
     shot("case-save-as")
 
 
-def c_recent_menu(win):
+def c_recent_menu():
     menu("文件", "最近文件")
-    time.sleep(0.6)
-    el = find_el(os.path.basename(FILE2B), contains=True) or find_el(os.path.basename(FILE1), contains=True)
-    win = cur_win()
-    if el is None:
+    time.sleep(0.8)
+    ok = worker_find_click(os.path.basename(FILE2B), retry=0) or worker_find_click(os.path.basename(FILE1), retry=0)
+    if not ok:
         raise AssertionError("最近文件列表里没有目标文件")
-    try:
-        el.invoke()
-    except Exception:
-        el.click_input()
     time.sleep(1.2)
     esc_cleanup()
     shot("case-recent")
 
 
-def c_export_html(win):
+def c_export_html():
     menu("文件", "导出", "导出为可打印 HTML（PDF 用）…")
     time.sleep(0.6)
     picker_typing(HTML_OUT)
@@ -637,8 +678,8 @@ def c_export_html(win):
     shot("case-export-html")
 
 
-def c_save_all(win):
-    click_editor(win)
+def c_save_all():
+    click_editor()
     type_text("More")
     menu("文件", "全部保存")
     time.sleep(1.2)
@@ -647,11 +688,11 @@ def c_save_all(win):
     shot("case-save-all")
 
 
-def c_tabs_and_close(win):
+def c_tabs_and_close():
     esc_cleanup()
     send_keys("^n")
     time.sleep(0.9)
-    click_editor(win)
+    click_editor()
     type_text("third-tab")
     shot("case-tab-third")
     send_keys("^w")
@@ -660,29 +701,18 @@ def c_tabs_and_close(win):
     shot("case-tab-closed")
 
 
-def c_settings(win):
+def c_settings():
     menu("工具", "设置…")
     time.sleep(1.2)
-    win = cur_win()
     shot("case-settings-dialog")
-    for el in win.descendants(control_type="Button"):
-        try:
-            if el.window_text() in ("自动换行", "显示行号"):
-                el.click_input()
-                time.sleep(0.35)
-        except Exception:
-            continue
-    for b in win.descendants(control_type="Button"):
-        if b.window_text() == "应用":
-            b.click_input()
-            break
-    else:
-        send_keys("{ENTER}")
-    time.sleep(0.9)
+    worker_click_button("自动换行")
+    worker_click_button("显示行号")
+    worker_click_button("应用")
+    time.sleep(1.0)
     shot("case-settings-applied")
 
 
-def c_exit(win, exe):
+def c_exit():
     wer_before = wer_count()
     esc_cleanup()
     menu("文件", "退出")
@@ -694,62 +724,51 @@ def c_exit(win, exe):
     shot("case-exit")
 
 
-def dump_tree():
-    try:
-        for _d in _iter_candidates():
-            try:
-                _t = _d.window_text()
-                _ct = _d.element_info.control_type
-                if _t or _ct in ("MenuItem", "MenuFlyoutItem", "ToggleMenuFlyoutItem"):
-                    print("EL", _ct, "|", (_t or "")[:60], flush=True)
-            except Exception:
-                continue
-        print("MENU-TITLES 可见:", [n for n in ["文件", "编辑", "搜索", "查看", "语言", "编码", "主题", "工具"] if find_el(n) is not None], flush=True)
-    except Exception as e:
-        print("dump err", e, flush=True)
-
-
 def main():
+    global WIN_HANDLE
+    if sys.argv[1:2] == ["__worker"]:
+        worker_main(sys.argv[2:])
+        return
     exe = find_exe()
     print("exe:", exe, flush=True)
+    from pywinauto import Application, Desktop
     app = Application(backend="uia").start(exe, timeout=25)
     time.sleep(12)
     win = Desktop(backend="uia").window(title_re=".*TaoPad.*", visible_only=True)
     win.set_focus()
-    global WIN_HANDLE
     WIN_HANDLE = win.handle
     time.sleep(1)
-    dump_tree()
+    worker_dump()
 
-    case("S01 启动就绪与状态栏", lambda: c_startup(win))
-    case("O08a 新建标签", lambda: c_new_tab(win))
-    case("E01 输入/全选/复制/撤销/重做", lambda: c_type_undo_redo(win))
-    case("E02 剪切/粘贴", lambda: c_cut_copy_paste(win))
-    case("E03 插入时间日期(F5)", lambda: c_insert_time(win))
-    case("E04 行操作(复制/上移/下移/删除)", lambda: c_line_ops(win))
-    case("E05 大小写转换", lambda: c_case_convert(win))
-    case("E06 格式化文档", lambda: c_format(win))
-    case("E07 注释/取消注释(菜单)", lambda: c_comment(win))
-    case("F01 查找面板/F3/F3反向", lambda: c_find_panel(win))
-    case("F02 替换面板", lambda: c_replace_panel(win))
-    case("F03 转到行", lambda: c_goto(win))
-    case("F04 在文件中查找", lambda: c_find_in_files(win))
-    case("V01 缩放(放大/缩小/复位)", lambda: c_zoom(win))
-    case("V02 自动换行切换", lambda: c_wrap_toggle(win))
-    case("V03 显示行号切换", lambda: c_lineno_toggle(win))
-    case("T01 主题三套切换", lambda: c_themes(win))
-    case("C01 保存编码5种", lambda: c_encodings(win))
-    case("C02 换行符3种", lambda: c_eols(win))
-    case("L01 语言13种逐一切换", lambda: c_languages(win))
-    case("O01 保存(Ctrl+S→选择器)", lambda: c_save(win))
-    case("O02 打开(Ctrl+O→选择器)", lambda: c_open(win))
-    case("O03 另存为", lambda: c_save_as(win))
-    case("O04 全部保存", lambda: c_save_all(win))
-    case("O05 最近文件菜单", lambda: c_recent_menu(win))
-    case("O06 导出可打印HTML", lambda: c_export_html(win))
-    case("O07 标签页新增/切换/关闭", lambda: c_tabs_and_close(win))
-    case("T02 设置对话框(开关+主题+应用)", lambda: c_settings(win))
-    case("O09 正常退出+崩溃检查", lambda: c_exit(win, exe))
+    case("S01 启动就绪与状态栏", c_startup)
+    case("O08a 新建标签", c_new_tab)
+    case("E01 输入/全选/复制/撤销/重做", c_type_undo_redo)
+    case("E02 剪切/粘贴", c_cut_copy_paste)
+    case("E03 插入时间日期(F5)", c_insert_time)
+    case("E04 行操作(复制/上移/下移/删除)", c_line_ops)
+    case("E05 大小写转换", c_case_convert)
+    case("E06 格式化文档", c_format)
+    case("E07 注释/取消注释(菜单)", c_comment)
+    case("F01 查找面板/F3/F3反向", c_find_panel)
+    case("F02 替换面板", c_replace_panel)
+    case("F03 转到行", c_goto)
+    case("F04 在文件中查找", c_find_in_files)
+    case("V01 缩放(放大/缩小/复位)", c_zoom)
+    case("V02 自动换行切换", c_wrap_toggle)
+    case("V03 显示行号切换", c_lineno_toggle)
+    case("T01 主题三套切换", c_themes)
+    case("C01 保存编码5种", c_encodings)
+    case("C02 换行符3种", c_eols)
+    case("L01 语言13种逐一切换", c_languages)
+    case("O01 保存(Ctrl+S→选择器)", c_save)
+    case("O02 打开(Ctrl+O→选择器)", c_open)
+    case("O03 另存为", c_save_as)
+    case("O04 全部保存", c_save_all)
+    case("O05 最近文件菜单", c_recent_menu)
+    case("O06 导出可打印HTML", c_export_html)
+    case("O07 标签页新增/切换/关闭", c_tabs_and_close)
+    case("T02 设置对话框(开关+主题+应用)", c_settings)
+    case("O09 正常退出+崩溃检查", c_exit)
 
     report = {"cases": RESULTS, "total": len(RESULTS),
               "failed": [r["case"] for r in RESULTS if r["result"] == "FAIL"]}
