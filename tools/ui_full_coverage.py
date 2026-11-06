@@ -149,6 +149,7 @@ def type_text(s):
 
 
 def editor_clipboard():
+    pyperclip.copy("")
     send_keys("^a")
     time.sleep(0.2)
     send_keys("^c")
@@ -156,40 +157,64 @@ def editor_clipboard():
     return pyperclip.paste()
 
 
-def menu(win, *titles):
-    """点击菜单路径，如 menu(win,'编码','保存编码','GBK')"""
-    win.child_window(title=titles[0], control_type="MenuItem", found_index=0).click_input()
-    time.sleep(0.5)
-    for t in titles[1:]:
-        click_item_anywhere(win, t)
-        time.sleep(0.5)
-
-
-def click_item_anywhere(win, title):
-    # WinUI 菜单弹出层是独立 HWND，先在本窗口找，找不到就全桌面找
+def _iter_candidates(win):
+    """主窗口 + 全部顶层弹窗的元素，逐个让出"""
+    yield from _safe_descendants(win)
     try:
-        el = win.child_window(title=title, control_type="MenuItem", found_index=0)
-        if el.exists(0.4):
-            _fire(el)
-            return
+        for w in Desktop(backend="uia").windows():
+            try:
+                if w.handle == win.handle:
+                    continue
+            except Exception:
+                pass
+            yield from _safe_descendants(w)
     except Exception:
         pass
-    for w in Desktop(backend="uia").windows():
+
+
+def _safe_descendants(w):
+    try:
+        for d in w.descendants():
+            yield d
+    except Exception:
+        pass
+
+
+def find_el(win, title, contains=False):
+    for d in _iter_candidates(win):
         try:
-            el = w.child_window(title=title, control_type="MenuItem", found_index=0)
-            if el.exists(0.3):
-                _fire(el)
-                return
+            t = d.window_text().strip()
+            if (t == title) if not contains else (title in t):
+                return d
         except Exception:
             continue
-    raise AssertionError("菜单项未找到：" + title)
+    return None
 
 
-def _fire(el):
-    try:
-        el.invoke()
-    except Exception:
-        el.click_input()
+def menu(win, *titles):
+    """点击菜单路径，如 menu(win,'编码','保存编码','GBK')；WinUI 菜单条与弹出层分别处理"""
+    top = find_el(win, titles[0])
+    if top is None:
+        seen = []
+        for d in _safe_descendants(win):
+            try:
+                seen.append(f"{d.element_info.control_type}:{d.window_text()!r}")
+            except Exception:
+                pass
+            if len(seen) >= 60:
+                break
+        raise AssertionError("找不到顶层菜单：" + titles[0] + "  现有元素: " + " | ".join(seen))
+    top.click_input()
+    time.sleep(0.7)
+    for t in titles[1:]:
+        el = find_el(win, t)
+        if el is None:
+            raise AssertionError("找不到菜单项：" + t)
+        try:
+            el.invoke()
+        except Exception:
+            el.click_input()
+        time.sleep(0.7)
 
 
 def dialog_edit(win, value, enter=True):
@@ -352,12 +377,17 @@ def c_comment(win):
     type_text("code-line")
     n0 = len(editor_clipboard())
     send_keys("^a")
-    send_keys("^kc")
+    time.sleep(0.2)
+    send_keys("^k")
+    time.sleep(0.3)
+    send_keys("c")
     time.sleep(0.5)
     n1 = len(editor_clipboard())
     assert n1 > n0, f"注释未生效 {n0}->{n1}"
     send_keys("^a")
-    send_keys("^ku")
+    send_keys("^k")
+    time.sleep(0.3)
+    send_keys("u")
     time.sleep(0.5)
     n2 = len(editor_clipboard())
     assert n2 < n1, f"取消注释未生效 {n1}->{n2}"
@@ -566,14 +596,17 @@ def c_save_as(win):
 def c_recent_menu(win):
     menu(win, "文件", "最近文件")
     time.sleep(0.5)
-    # 弹出子菜单后点击第一个最近文件（文件1路径）
-    name = os.path.basename(FILE2)
+    # 弹出子菜单后点击最近的文件（按文件名匹配）
+    name2 = os.path.basename(FILE2)
+    name1 = os.path.basename(FILE1)
+    el = find_el(win, name2, contains=True) or find_el(win, name1, contains=True)
+    if el is None:
+        raise AssertionError("最近文件列表里没有目标文件")
     try:
-        click_item_anywhere(win, name)
-        time.sleep(1.0)
+        el.invoke()
     except Exception:
-        click_item_anywhere(win, os.path.basename(FILE1))
-        time.sleep(1.0)
+        el.click_input()
+    time.sleep(1.0)
     shot("case-recent")
 
 
