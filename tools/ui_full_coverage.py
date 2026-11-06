@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-TaoPad 云端真机全功能界面自动化（v11，去除ALT置前干扰+缩放键修复版）
+TaoPad 云端真机全功能界面自动化（v13，UIA 直呼菜单版）
 每次界面元素枚举/点击都在独立 Python 子进程里完成——
 WinUI 菜单浮层曾把主进程的 COM/UIA 状态拖瘫（v1-v4 的根因），
 子进程天生免疫。键盘/剪贴板/截图仍在主进程。
@@ -241,6 +241,78 @@ def worker_main(argv):
                 if found:
                     break
             print("MENUITEM", "YES" if found else "NO")
+        elif mode == "menu_invoke":
+            # v13：UIA 直呼菜单——无鼠标无键盘、不经焦点，直接触发菜单项 Click。
+            # 第十轮查明键盘路径从未真正点中下拉项（查看/主题用例仅截图无断言，
+            # 语言/编码状态栏从未变过），故改走 UIA。titles 以 | 连接传入。
+            titles = (argv[2] if len(argv) > 2 else "").split("|")
+            found = "ERR:none"
+            try:
+                win2 = Application(backend="uia").connect(handle=h).window(handle=h)
+                pid = win2.process_id()
+
+                def same_pid():
+                    res = []
+                    try:
+                        for w in Desktop(backend="uia").windows():
+                            try:
+                                if w.process_id() == pid:
+                                    res.append(w)
+                            except Exception:
+                                continue
+                    except Exception:
+                        pass
+                    return res
+
+                for idx, tname in enumerate(titles):
+                    target = None
+                    scopes = [win2] if idx == 0 else same_pid()
+                    for scope in scopes:
+                        try:
+                            for d in scope.descendants(control_type="MenuItem"):
+                                try:
+                                    if (d.window_text() or "").strip() == tname:
+                                        target = d
+                                        break
+                                except Exception:
+                                    continue
+                        except Exception:
+                            pass
+                        if target is not None:
+                            break
+                    if target is None:
+                        found = f"MISS:{tname}"
+                        break
+                    if idx == len(titles) - 1:
+                        ok = False
+                        try:
+                            target.select()
+                            ok = True
+                        except Exception:
+                            pass
+                        if not ok:
+                            try:
+                                target.invoke()
+                                ok = True
+                            except Exception:
+                                pass
+                        if not ok:
+                            try:
+                                target.expand()
+                                ok = True
+                            except Exception:
+                                pass
+                        found = "OK" if ok else f"NOINVOKE:{tname}"
+                    else:
+                        try:
+                            target.select()
+                            time.sleep(0.8)
+                        except Exception:
+                            found = f"NOEXPAND:{tname}"
+                            break
+            except Exception as e:
+                found = f"ERR:{type(e).__name__}"
+            print("MENUINVOKE", found)
         elif mode == "count_edits":
             cnt = -1
             for w in sources:
@@ -462,11 +534,20 @@ def _open_top_keyboard(t):
 
 
 def menu(*titles):
-    """键盘路径为主。F10 聚焦菜单条→方向键→回车展开→下拉内键盘导航。
-    v12：撤掉 v11 的探针 ESC 重试——第九轮实证下拉项在 WinUI3 弹窗层，
-    主窗口 UIA 枚举不到，探针永远误报「未确认展开」（连事后通过了的
-    查看/主题用例也在报），且探针里的 ESC 会把开好的菜单再关掉。"""
+    """v13：主路径改为 UIA 直呼菜单——无鼠标无键盘、不经焦点，直接触发
+    菜单项 Click。第十轮查明：键盘路径在云端从未真正点中下拉项（此前
+    V02/V03/T01 仅截图无断言，属空过；语言/编码状态栏从未变过，且源码
+    实证 Click 处理器会立即刷新状态栏）。UIA 直呼后打印读层存活情况，
+    留观「invoke 是否同鼠标一样拖垮读层」。失败时退回 v12 键盘流程。"""
     close_panel()
+    out = worker_run(["menu_invoke", str(WIN_HANDLE), "|".join(titles)])
+    ok = "MENUINVOKE OK" in out
+    print(f"菜单[{'>'.join(titles)}]UIA直呼: {out.strip()}", flush=True)
+    if ok:
+        print(f"读层存活: {read_alive()}", flush=True)
+        if dialog_present():
+            click_editor()   # 下拉未自动收起时点编辑区收尾
+        return
     send_keys("{F10}")
     time.sleep(0.9)
     topi = TOPMENUS.index(titles[0])
