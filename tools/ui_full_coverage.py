@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-TaoPad 云端真机全功能界面自动化（v13，UIA 直呼菜单版）
+TaoPad 云端真机全功能界面自动化（v14，直呼回传修复版）
 每次界面元素枚举/点击都在独立 Python 子进程里完成——
 WinUI 菜单浮层曾把主进程的 COM/UIA 状态拖瘫（v1-v4 的根因），
 子进程天生免疫。键盘/剪贴板/截图仍在主进程。
@@ -56,12 +56,19 @@ WIN_HANDLE = None
 # ---------------- 子进程工作器 ----------------
 
 def worker_run(argv):
-    """独立进程做 UIA 操作，返回 stdout 字符串"""
+    """独立进程做 UIA 操作，返回 stdout 字符串。v14：兜底超时与异常，
+    任何失败都回传明确标记，不让传话通道静默变空。"""
     exe = sys.executable
-    out = subprocess.run([exe, os.path.abspath(__file__), "__worker"] + argv,
-                         capture_output=True, text=True, encoding="utf-8", errors="replace",
-                         timeout=90)
-    return out.stdout + out.stderr
+    try:
+        out = subprocess.run([exe, os.path.abspath(__file__), "__worker"] + argv,
+                             capture_output=True, text=True, encoding="utf-8", errors="replace",
+                             timeout=90)
+        return out.stdout + out.stderr
+    except subprocess.TimeoutExpired as e:
+        partial = (e.stdout or b"").decode("utf-8", "replace") if isinstance(e.stdout, bytes) else str(e.stdout or "")
+        return f"WORKER_TIMEOUT {partial}"
+    except Exception as e:
+        return f"WORKER_ERR {type(e).__name__}"
 
 
 def worker_texts():
@@ -246,6 +253,8 @@ def worker_main(argv):
             # 第十轮查明键盘路径从未真正点中下拉项（查看/主题用例仅截图无断言，
             # 语言/编码状态栏从未变过），故改走 UIA。titles 以 | 连接传入。
             titles = (argv[2] if len(argv) > 2 else "").split("|")
+            h = int(argv[1])   # v14：本分支此前漏定义 h，连接必抛 NameError
+            print("MENUINVOKE start", flush=True)   # v14：实时回传，防崩溃丢缓冲
             found = "ERR:none"
             try:
                 win2 = Application(backend="uia").connect(handle=h).window(handle=h)
