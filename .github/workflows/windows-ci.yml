@@ -1,0 +1,39 @@
+name: windows-ci
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: 源码自检（BOM/编码/占位符检查）
+        shell: pwsh
+        run: ./tools/Check-Source.ps1
+
+      - name: 还原依赖
+        run: dotnet restore src/AntPad/AntPad.csproj
+
+      - name: 云端 Windows 编译（Release x64 自包含）
+        run: >
+          dotnet publish src/AntPad/AntPad.csproj -c Release -r win-x64
+          --self-contained true -p:WindowsAppSDKSelfContained=true -p:Platform=x64
+
+      - name: 上传构建产物
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taopad-build-output
+          path: src/AntPad/bin/x64/Release/publish/
+          retention-days: 14
