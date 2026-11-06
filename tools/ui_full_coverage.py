@@ -274,22 +274,37 @@ def worker_main(argv):
                         pass
                     return res
 
+                def esc_clear():
+                    # v17：读层拖垮自救——第十四轮实锤 select() 展开菜单后应用
+                    # UIA 供给整体空死，浮层滞留是嫌疑之一。先 ESC 清浮层再重试。
+                    try:
+                        from pywinauto.keyboard import send_keys as _sk
+                        _sk("{ESC}")
+                        time.sleep(0.6)
+                    except Exception:
+                        pass
+
                 for idx, tname in enumerate(titles):
                     target = None
-                    scopes = [win2] if idx == 0 else same_pid()
-                    for scope in scopes:
-                        try:
-                            for d in scope.descendants(control_type="MenuItem"):
-                                try:
-                                    if (d.window_text() or "").strip() == tname:
-                                        target = d
-                                        break
-                                except Exception:
-                                    continue
-                        except Exception:
-                            pass
-                        if target is not None:
+                    for attempt in range(3):   # v17：枚举不到先清浮层再重试
+                        scopes = [win2] if idx == 0 else same_pid()
+                        for scope in scopes:
+                            try:
+                                for d in scope.descendants(control_type="MenuItem"):
+                                    try:
+                                        if (d.window_text() or "").strip() == tname:
+                                            target = d
+                                            break
+                                    except Exception:
+                                        continue
+                            except Exception:
+                                pass
+                            if target is not None:
+                                break
+                        if target is not None or attempt == 2:
                             break
+                        print("MENUINVOKE", f"retry{attempt+1}:{tname}", flush=True)
+                        esc_clear()
                     if target is None:
                         found = f"MISS:{tname}"
                         break
@@ -322,6 +337,14 @@ def worker_main(argv):
                             break
             except Exception as e:
                 found = f"ERR:{type(e).__name__}"
+            if not found.startswith(("OK", "ERR:none")):
+                esc_clear()   # v17：失败收尾再清一次浮层，防滞留拖垮下一轮读取
+                try:
+                    from pywinauto.keyboard import send_keys as _sk2
+                    _sk2("{ESC}")
+                    time.sleep(0.4)
+                except Exception:
+                    pass
             print("MENUINVOKE", found)
         elif mode == "count_edits":
             cnt = -1
