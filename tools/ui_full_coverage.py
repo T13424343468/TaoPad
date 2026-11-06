@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-TaoPad 云端真机全功能界面自动化（v5，子进程隔离版）
+TaoPad 云端真机全功能界面自动化（v7，面板闭环+鼠标路径版）
 每次界面元素枚举/点击都在独立 Python 子进程里完成——
 WinUI 菜单浮层曾把主进程的 COM/UIA 状态拖瘫（v1-v4 的根因），
 子进程天生免疫。键盘/剪贴板/截图仍在主进程。
+v7：查找/替换等面板用例结束后强制关闭并轮询验证；
+菜单打开优先鼠标路径（UIA 矩形→真实坐标点击），键盘 F10 兜底；
+状态栏断言改轮询重试；退出前先全部保存、进程退出轮询 10 秒。
 覆盖：文件9/编辑16/搜索6/查看3组/语言13/编码5+3/主题3/设置/标签页/状态栏。
 """
 import json
@@ -80,6 +83,38 @@ def worker_click_button(name):
     return "OK" in worker_run(["click_button", name])
 
 
+def worker_edits_on_win():
+    out = worker_run(["count_edits", str(WIN_HANDLE)])
+    m = re.search(r"EDITC (\d+)", out)
+    return int(m.group(1)) if m else -1
+
+
+def worker_click_menu(title):
+    """鼠标路径：UIA 取菜单栏项矩形 → 真实坐标点击（与键盘路径互为对照）"""
+    for _ in range(2):
+        out = worker_run(["mouse_menu", str(WIN_HANDLE), title])
+        if "OK" in out:
+            return True
+        send_keys("{ESC}")
+        time.sleep(0.5)
+    return False
+
+
+def close_panel(verify=True, timeout=8.0):
+    """点编辑器 + ESC 关闭查找/替换等面板，并轮询验证面板确已关闭（编辑框数量回落）"""
+    click_editor()
+    esc_cleanup()
+    if not verify:
+        return True
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        if worker_edits_on_win() <= 1:
+            return True
+        send_keys("{ESC}")
+        time.sleep(0.8)
+    return worker_edits_on_win() <= 1
+
+
 def worker_dump():
     out = worker_run(["dump", str(WIN_HANDLE)])
     for line in out.splitlines():
@@ -121,6 +156,30 @@ def worker_main(argv):
         app = Application(backend="uia").connect(handle=h)
         win = app.window(handle=h)
         print("EDIT", len(win.descendants(control_type="Edit")))
+    elif mode == "count_edits":
+        h = int(argv[1])
+        app = Application(backend="uia").connect(handle=h)
+        win = app.window(handle=h)
+        print("EDITC", len(win.descendants(control_type="Edit")))
+    elif mode == "mouse_menu":
+        h = int(argv[1])
+        title = argv[2]
+        app = Application(backend="uia").connect(handle=h)
+        win = app.window(handle=h)
+        for d in win.descendants(control_type="MenuItem"):
+            try:
+                if (d.window_text() or "").strip() == title:
+                    rect = d.rectangle()
+                    x = (rect.left + rect.right) // 2
+                    y = (rect.top + rect.bottom) // 2
+                    ctypes.windll.user32.SetCursorPos(x, y)
+                    ctypes.windll.user32.mouse_event(2, 0, 0, 0, 0)
+                    ctypes.windll.user32.mouse_event(4, 0, 0, 0, 0)
+                    print("OK")
+                    return
+            except Exception:
+                continue
+        print("NOTFOUND")
     elif mode == "click_last_edit":
         h = int(argv[1])
         app = Application(backend="uia").connect(handle=h)
@@ -274,16 +333,19 @@ SUBMENUS = {
 
 
 def menu(*titles):
-    """键盘导航菜单：F10 聚焦菜单条 → 方向键选择 → Enter 打开/触发（WinUI MenuBar 官方键盘路径）"""
-    esc_cleanup()
-    click_editor()
-    send_keys("{F10}")
-    time.sleep(0.9)
-    topi = TOPMENUS.index(titles[0])
-    for _ in range(topi):
-        send_keys("{RIGHT}")
-        time.sleep(0.35)
-    send_keys("{ENTER}")
+    """打开菜单：优先鼠标路径（UIA 取菜单项矩形→真实坐标点击），
+    鼠标未命中退回键盘 F10 导航；下拉内仍走键盘。
+    先关残留面板，防止面板劫持菜单焦点。"""
+    close_panel()
+    opened = worker_click_menu(titles[0])
+    if not opened:
+        send_keys("{F10}")
+        time.sleep(0.9)
+        topi = TOPMENUS.index(titles[0])
+        for _ in range(topi):
+            send_keys("{RIGHT}")
+            time.sleep(0.35)
+        send_keys("{ENTER}")
     time.sleep(1.0)
     if len(titles) > 1:
         lst = MENUS[titles[0]]
@@ -305,12 +367,23 @@ def texts():
     return worker_texts()
 
 
-def status_has(exact=None, contains=None):
-    ts = texts()
-    if exact is not None and not any(t.strip() == exact for t in ts):
-        raise AssertionError(f"状态栏没有精确项[{exact}]，当前: {ts[:20]}")
-    if contains is not None and not any(contains in t for t in ts):
-        raise AssertionError(f"状态栏没有包含[{contains}]，当前: {ts[:20]}")
+def status_has(exact=None, contains=None, timeout=8.0):
+    """轮询重试，等界面/菜单操作落盘后再断言"""
+    t0 = time.time()
+    ts = []
+    while True:
+        ts = texts()
+        if exact is not None and any(t.strip() == exact for t in ts):
+            return
+        if contains is not None and any(contains in t for t in ts):
+            return
+        if exact is None and contains is None:
+            return
+        if time.time() - t0 > timeout:
+            if exact is not None:
+                raise AssertionError(f"状态栏没有精确项[{exact}]，当前: {ts[:20]}")
+            raise AssertionError(f"状态栏没有包含[{contains}]，当前: {ts[:20]}")
+        time.sleep(1.0)
 
 
 def click_editor():
@@ -524,6 +597,8 @@ def c_find_panel():
     esc_cleanup()
     send_keys("^a{DEL}")
     type_text("xx apple yy apple")
+    send_keys("^{HOME}")          # 查找从光标向后且不回绕，先回文档开头
+    time.sleep(0.4)
     send_keys("^f")
     time.sleep(1.0)
     send_keys("apple")
@@ -537,7 +612,7 @@ def c_find_panel():
     send_keys("+{F3}")            # 查找上一个
     time.sleep(0.6)
     shot("case-find-panel")
-    esc_cleanup()
+    close_panel()
     click_editor()
 
 
@@ -557,7 +632,7 @@ def c_replace_panel():
     send_keys("{ENTER}")
     time.sleep(0.7)
     shot("case-replace-panel")
-    esc_cleanup()
+    close_panel()
 
 
 def c_goto():
@@ -576,15 +651,23 @@ def c_goto():
             break
         send_keys("^g")
         time.sleep(1.0)
-    esc_cleanup()
+    close_panel()
     shot("case-goto")
     assert ok, "转到行未生效，状态栏未见 行 5"
 
 
 def c_find_in_files():
-    esc_cleanup()
-    send_keys("^+{F}")
-    time.sleep(1.3)
+    close_panel()
+    opened = False
+    for _ in range(3):
+        send_keys("^+{F}")
+        time.sleep(1.3)
+        if worker_edits_on_win() > 1:   # 面板带输入框，编辑框数量增加即视为已开
+            opened = True
+            break
+        send_keys("{ESC}")
+        time.sleep(0.5)
+    assert opened, "在文件中查找面板未打开"
     send_keys(DOCS)        # 文件夹框（首个控件，默认焦点）
     time.sleep(0.4)
     send_keys("{TAB}")     # 到查找内容框
@@ -594,14 +677,17 @@ def c_find_in_files():
     send_keys("{ENTER}")   # 回车触发扫描
     time.sleep(2.5)
     shot("case-find-in-files")
-    esc_cleanup()
+    close_panel()
 
 
 def zoom_val():
-    for t in texts():
-        m = re.fullmatch(r"\d{2,3}%", t.strip())
-        if m:
-            return int(m.group(1))
+    t0 = time.time()
+    while time.time() - t0 < 8.0:
+        for t in texts():
+            m = re.fullmatch(r"(\d{2,3})%", t.strip())
+            if m:
+                return int(m.group(1))
+        time.sleep(1.0)
     raise AssertionError("状态栏没有缩放百分比: " + str(texts()[:20]))
 
 
@@ -723,11 +809,12 @@ def c_save_as():
 
 
 def c_recent_menu():
-    esc_cleanup()
-    click_editor()
-    send_keys("{F10}")
-    time.sleep(0.9)
-    send_keys("{ENTER}")          # 焦点在文件（第一项），回车打开下拉
+    close_panel()
+    if not worker_click_menu("文件"):
+        # 键盘兜底：F10 聚焦菜单条（焦点在第一项「文件」），回车打开下拉
+        send_keys("{F10}")
+        time.sleep(0.9)
+        send_keys("{ENTER}")
     time.sleep(1.0)
     for _ in range(MENUS["文件"].index("最近文件")):
         send_keys("{DOWN}")
@@ -798,12 +885,18 @@ def c_settings():
 
 def c_exit():
     wer_before = wer_count()
-    esc_cleanup()
+    close_panel()
+    menu("文件", "全部保存")      # 退出前先落盘，避免未保存确认框卡住流程
+    time.sleep(1.0)
     menu("文件", "退出")
-    time.sleep(3.5)
-    out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq TaoPad.exe"], capture_output=True, text=True)
-    still = "TaoPad.exe" in out.stdout
-    assert not still, "退出后进程仍在"
+    still = True
+    t0 = time.time()
+    while still and time.time() - t0 < 10:
+        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq TaoPad.exe"], capture_output=True, text=True)
+        still = "TaoPad.exe" in out.stdout
+        if still:
+            time.sleep(1.0)
+    assert not still, "退出后进程仍在（等待10秒）"
     assert wer_count() == wer_before, "退出过程出现新崩溃记录"
     shot("case-exit")
 
