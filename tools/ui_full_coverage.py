@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-TaoPad 云端真机全功能界面自动化（v10，键盘菜单为主+鼠标路径专项对照版）
+TaoPad 云端真机全功能界面自动化（v11，去除ALT置前干扰+缩放键修复版）
 每次界面元素枚举/点击都在独立 Python 子进程里完成——
 WinUI 菜单浮层曾把主进程的 COM/UIA 状态拖瘫（v1-v4 的根因），
 子进程天生免疫。键盘/剪贴板/截图仍在主进程。
@@ -20,6 +20,13 @@ v10（第七轮证据回灌）：v9 多通道读取+ESC 清浮层仍救不回—
 交互本身会拖瘫应用的 UIA Text 供给（软件侧待查缺陷）。v10 改为键盘菜单
 为主路径，鼠标点菜单单独设专项对照用例放在收尾（功能验证走内容比对，
 不依赖 UIA 读层），并在读取失效时自动 dump 留证。
+v11（第八轮证据回灌）：第八轮读层全程存活（键盘菜单生效，坐实鼠标点
+菜单栏拖瘫读层的结论），但键盘菜单自身大面积失灵：状态栏停在原语言、
+编辑区多出换行——症状指向子进程读取里的 ALT 置前小技巧：按下并释放
+ALT 会把菜单栏置为"菜单模式"，随后的 F10 被当成关闭菜单，方向键和回车
+漏进编辑区。v11 去掉 ALT 置前，只保留句柄+按标题双通道读取；菜单打开
+后加一次可见性验证、未开重试一次；缩放改用底层按键（pywinauto 不认
+{ADD} 键名，此前一直被读层故障掩盖）。
 覆盖：文件9/编辑16/搜索6/查看3组/语言13/编码5+3/主题3/设置/标签页/状态栏。
 """
 import json
@@ -177,14 +184,8 @@ def worker_main(argv):
     elif mode in ("read_texts", "count_edits", "has_edit", "menu_item_visible"):
         h = int(argv[1])
         title = argv[2] if mode == "menu_item_visible" else None
-        # 置前：部分 UIA 提供方对后台窗口会停止服务 Text 枚举
-        try:
-            ctypes.windll.user32.keybd_event(0x12, 0, 0, 0)
-            ctypes.windll.user32.SetForegroundWindow(h)
-            ctypes.windll.user32.keybd_event(0x12, 0, 2, 0)
-            time.sleep(0.2)
-        except Exception:
-            pass
+        # v11：去掉 ALT 置前——按下并释放 ALT 会把应用切进菜单模式，
+        # 让随后的 F10 变成"关闭菜单"、方向键漏进编辑区（第八轮实锤）
         win = None
         try:
             app = Application(backend="uia").connect(handle=h)
@@ -450,19 +451,30 @@ def read_alive():
     return menu_item_visible("文件")
 
 
-def menu(*titles):
-    """键盘路径为主（第四轮纯键盘菜单读取始终正常；鼠标点菜单栏会拖瘫
-    应用 UIA Text 供给，另设专项对照用例验证）。F10 聚焦菜单条→方向键
-    到目标→回车展开→下拉内键盘导航。先关残留面板，防止面板劫持焦点。"""
-    close_panel()
+def _open_top_keyboard(t):
     send_keys("{F10}")
     time.sleep(0.9)
-    topi = TOPMENUS.index(titles[0])
-    for _ in range(topi):
+    for _ in range(TOPMENUS.index(t)):
         send_keys("{RIGHT}")
         time.sleep(0.35)
     send_keys("{ENTER}")
     time.sleep(1.0)
+
+
+def menu(*titles):
+    """键盘路径为主（键盘路径七轮里读层始终正常）。F10 聚焦菜单条→方向键
+    到目标→回车展开→下拉内键盘导航。v11：打开后探针验证目标项可见，
+    未开 ESC 后重试一次（ALT 置前干扰已去除，探针不再拖累菜单焦点）。
+    先关残留面板，防止面板劫持焦点。"""
+    close_panel()
+    for attempt in range(2):
+        _open_top_keyboard(titles[0])
+        target = titles[1] if len(titles) > 1 else titles[0]
+        if not read_alive() or menu_item_visible(target):
+            break
+        print(f"菜单[{titles[0]}]键盘路径未确认展开，重试一次", flush=True)
+        send_keys("{ESC}")
+        time.sleep(0.5)
     if len(titles) > 1:
         lst = MENUS[titles[0]]
         for _ in range(lst.index(titles[1])):
@@ -844,21 +856,27 @@ def zoom_val():
     raise AssertionError("状态栏没有缩放百分比: " + str(texts()[:20]))
 
 
+def zoom_hotkey(vk_code):
+    """v11：pywinauto 不认 {ADD} 键名（此前一直被读层故障掩盖），改底层按键"""
+    ctypes.windll.user32.keybd_event(0x11, 0, 0, 0)      # Ctrl down
+    ctypes.windll.user32.keybd_event(vk_code, 0, 0, 0)
+    ctypes.windll.user32.keybd_event(vk_code, 0, 2, 0)
+    ctypes.windll.user32.keybd_event(0x11, 0, 2, 0)      # Ctrl up
+    time.sleep(0.8)
+
+
 def c_zoom():
     click_editor()
     esc_cleanup()
     z0 = zoom_val()
-    send_keys("^{ADD}")
-    time.sleep(0.8)
+    zoom_hotkey(0x6B)          # Ctrl+小键盘加号 = 放大
     z1 = zoom_val()
     assert z1 > z0, f"放大未生效 {z0}->{z1}"
-    send_keys("^{ADD}")
-    time.sleep(0.8)
+    zoom_hotkey(0x6B)
     z2 = zoom_val()
     assert z2 > z1, f"放大第二次未生效 {z1}->{z2}"
     shot("case-zoom-in")
-    send_keys("^{SUBTRACT}")
-    time.sleep(0.8)
+    zoom_hotkey(0x6D)          # Ctrl+小键盘减号 = 缩小
     assert zoom_val() < z2, "缩小未生效"
     send_keys("^0")
     time.sleep(0.8)
