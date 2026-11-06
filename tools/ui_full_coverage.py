@@ -170,6 +170,7 @@ def worker_dump():
 def worker_main(argv):
     from pywinauto import Application, Desktop
     mode = argv[0]
+    print(f"WORKER-ALIVE {mode}", flush=True)   # v15：子进程一进就回执，丢在哪环立刻可见
     if mode == "find_click":
         title = argv[1]
         for w in Desktop(backend="uia").windows():
@@ -551,7 +552,12 @@ def menu(*titles):
     close_panel()
     out = worker_run(["menu_invoke", str(WIN_HANDLE), "|".join(titles)])
     ok = "MENUINVOKE OK" in out
-    print(f"菜单[{'>'.join(titles)}]UIA直呼: {out.strip()}", flush=True)
+    print(f"菜单[{'>'.join(titles)}]UIA直呼: {out!r}", flush=True)   # v15：repr 原样回显，空与不可见字符可辨
+    try:   # v15：回执落盘，随证据文件上传，绕开任何管道疑虑
+        with open(os.path.join(EVID, "menu_invoke_trace.log"), "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%H:%M:%S')} menu({'|'.join(titles)}) -> {out!r}\n")
+    except Exception:
+        pass
     if ok:
         print(f"读层存活: {read_alive()}", flush=True)
         if dialog_present():
