@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-TaoPad 云端真机全功能界面自动化（v9，读取通道自愈+菜单开合验证版）
+TaoPad 云端真机全功能界面自动化（v10，键盘菜单为主+鼠标路径专项对照版）
 每次界面元素枚举/点击都在独立 Python 子进程里完成——
 WinUI 菜单浮层曾把主进程的 COM/UIA 状态拖瘫（v1-v4 的根因），
 子进程天生免疫。键盘/剪贴板/截图仍在主进程。
@@ -15,6 +15,11 @@ v9（第六轮证据回灌）：E07 起读取层系统性返回空——按句�
 常驻菜单项能否枚举→区分"读层失效"与"下拉未开"），未开则退回键盘路径
 （第四轮纯键盘菜单读取始终正常）；编辑框计数把读取失败(-1)视为未知，
 不再误判为"面板已关"。
+v10（第七轮证据回灌）：v9 多通道读取+ESC 清浮层仍救不回——E07 起读取
+依旧全空，而键盘路径菜单四轮里读取始终正常。结论：鼠标点菜单栏这一
+交互本身会拖瘫应用的 UIA Text 供给（软件侧待查缺陷）。v10 改为键盘菜单
+为主路径，鼠标点菜单单独设专项对照用例放在收尾（功能验证走内容比对，
+不依赖 UIA 读层），并在读取失效时自动 dump 留证。
 覆盖：文件9/编辑16/搜索6/查看3组/语言13/编码5+3/主题3/设置/标签页/状态栏。
 """
 import json
@@ -446,36 +451,21 @@ def read_alive():
 
 
 def menu(*titles):
-    """打开菜单：优先鼠标路径（UIA 取菜单项矩形→真实坐标点击），
-    开合可验证：探针正常而目标项不可见时，ESC 后退回键盘 F10 路径
-    （第四轮纯键盘菜单读取始终正常）；读层失效时按原路径继续。
-    下拉内仍走键盘。先关残留面板，防止面板劫持菜单焦点。"""
+    """键盘路径为主（第四轮纯键盘菜单读取始终正常；鼠标点菜单栏会拖瘫
+    应用 UIA Text 供给，另设专项对照用例验证）。F10 聚焦菜单条→方向键
+    到目标→回车展开→下拉内键盘导航。先关残留面板，防止面板劫持焦点。"""
     close_panel()
-    worker_click_menu(titles[0])
+    send_keys("{F10}")
+    time.sleep(0.9)
+    topi = TOPMENUS.index(titles[0])
+    for _ in range(topi):
+        send_keys("{RIGHT}")
+        time.sleep(0.35)
+    send_keys("{ENTER}")
     time.sleep(1.0)
-    target = titles[1] if len(titles) > 1 else titles[0]
-    alive = read_alive()
-    if alive and not menu_item_visible(target):
-        # 读层正常但目标项不在树里 → 下拉没开（或焦点没进菜单），退回键盘路径
-        print(f"菜单[{titles[0]}]鼠标路径未确认展开，退回键盘路径", flush=True)
-        send_keys("{ESC}")
-        time.sleep(0.5)
-        send_keys("{F10}")
-        time.sleep(0.9)
-        topi = TOPMENUS.index(titles[0])
-        for _ in range(topi):
-            send_keys("{RIGHT}")
-            time.sleep(0.35)
-        send_keys("{ENTER}")
-        time.sleep(1.0)
-    time.sleep(0.4)
     if len(titles) > 1:
         lst = MENUS[titles[0]]
-        idx = lst.index(titles[1])
-        # 下拉确已展开（项可见）才导航；读层失效时保持原样继续
-        if alive and not menu_item_visible(titles[1]):
-            send_keys("{DOWN}")   # 可能首次展开需再补一档
-        for _ in range(idx):
+        for _ in range(lst.index(titles[1])):
             send_keys("{DOWN}")
             time.sleep(0.35)
         if len(titles) > 2:
@@ -508,6 +498,7 @@ def status_has(exact=None, contains=None, timeout=12.0):
         if exact is None and contains is None:
             return
         if time.time() - t0 > timeout:
+            worker_dump()   # 读取失效现场留证：看 UIA 树里还剩什么
             if exact is not None:
                 raise AssertionError(f"状态栏没有精确项[{exact}]，当前: {ts[:20]}")
             raise AssertionError(f"状态栏没有包含[{contains}]，当前: {ts[:20]}")
@@ -990,8 +981,9 @@ def c_recent_menu():
     esc_cleanup()
     shot("case-recent")
     got = editor_clipboard().strip()
-    known = ("save-me-内容 extra", "save-me-内容 extraMore", " extra", " extraMore", "save-me-内容")
-    assert got in known, f"最近文件打开后内容不对: {got!r}"
+    # 剪贴板回读带 \r\n、历史键入偶发漂移，按去空白口径核对是否打开了正确文件
+    got_nospace = re.sub(r"\s+", "", got)
+    assert got_nospace.startswith("save-me-内容"), f"最近文件打开后内容不对: {got!r}"
 
 
 def c_export_html():
@@ -1058,6 +1050,31 @@ def c_settings():
     send_keys("{ENTER}")     # 默认按钮=应用
     time.sleep(1.2)
     shot("case-settings-applied")
+
+
+def c_mouse_menu():
+    """鼠标路径专项对照：真实坐标点击菜单栏「文件」→键盘导航到「新建」。
+    功能验证走内容比对（新建后应是空编辑区），不依赖 UIA 读层——
+    鼠标点菜单栏疑似会拖瘫应用 UIA Text 供给，此用例用于复现与留证。"""
+    close_panel()
+    ok = worker_click_menu("文件")
+    time.sleep(1.0)
+    for _ in range(MENUS["文件"].index("新建")):
+        send_keys("{DOWN}")
+        time.sleep(0.3)
+    send_keys("{ENTER}")
+    time.sleep(1.2)
+    if not dialog_present():
+        click_editor()
+    esc_cleanup()
+    click_editor()
+    type_text("mouse-path-ok")
+    clip = re.sub(r"\s+", "", editor_clipboard())
+    assert clip == "mouse-path-ok", (
+        f"鼠标路径菜单未建成新标签（内容残留）: {clip[-60:]!r}")
+    shot("case-mouse-menu")
+    # 留证：鼠标菜单交互后 UIA 读层是否还活着（打印探针结果，不作为断言）
+    print("鼠标路径后读取探针:", "存活" if read_alive() else "失效", flush=True)
 
 
 def c_exit():
@@ -1127,6 +1144,7 @@ def main():
     case("O06 导出可打印HTML", c_export_html)
     case("O07 标签页新增/切换/关闭", c_tabs_and_close)
     case("T02 设置对话框(开关+主题+应用)", c_settings)
+    case("O08b 鼠标路径菜单对照", c_mouse_menu)
     case("O09 正常退出+崩溃检查", c_exit)
 
     report = {"cases": RESULTS, "total": len(RESULTS),
