@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-TaoPad 云端真机全功能界面自动化（v7，面板闭环+鼠标路径版）
+TaoPad 云端真机全功能界面自动化（v8，读取重试+对话框就绪版）
 每次界面元素枚举/点击都在独立 Python 子进程里完成——
 WinUI 菜单浮层曾把主进程的 COM/UIA 状态拖瘫（v1-v4 的根因），
 子进程天生免疫。键盘/剪贴板/截图仍在主进程。
-v7：查找/替换等面板用例结束后强制关闭并轮询验证；
-菜单打开优先鼠标路径（UIA 矩形→真实坐标点击），键盘 F10 兜底；
-状态栏断言改轮询重试；退出前先全部保存、进程退出轮询 10 秒。
+v7：面板闭环+鼠标路径菜单+轮询断言+退出先存后验。
+v8（第五轮证据回灌）：界面读取空返回时重试；轮询间隔放宽到 2 秒
+降低机器负载；文件对话框先等就绪再整段粘贴路径（修复路径被吞头）；
+菜单操作后焦点点回编辑区；查找匹配列号按截图口径改为选中串末尾；
+退出时未命名标签的另存为对话框补路径确认。
 覆盖：文件9/编辑16/搜索6/查看3组/语言13/编码5+3/主题3/设置/标签页/状态栏。
 """
 import json
@@ -45,14 +47,19 @@ def worker_run(argv):
 
 
 def worker_texts():
-    out = worker_run(["read_texts", str(WIN_HANDLE)])
-    m = re.search(r"TEXTS (.*)", out)
-    if m:
-        try:
-            return json.loads(m.group(1))
-        except Exception:
-            return []
-    print("worker read_texts 失败:", out[:200], flush=True)
+    for _ in range(3):
+        out = worker_run(["read_texts", str(WIN_HANDLE)])
+        m = re.search(r"TEXTS (.*)", out)
+        if m:
+            try:
+                names = json.loads(m.group(1))
+            except Exception:
+                names = []
+            if names:
+                return names
+        else:
+            print("worker read_texts 失败:", out[:200], flush=True)
+        time.sleep(1.5)   # 机器繁忙时空读常见，稍候重试
     return []
 
 
@@ -100,7 +107,7 @@ def worker_click_menu(title):
     return False
 
 
-def close_panel(verify=True, timeout=8.0):
+def close_panel(verify=True, timeout=10.0):
     """点编辑器 + ESC 关闭查找/替换等面板，并轮询验证面板确已关闭（编辑框数量回落）"""
     click_editor()
     esc_cleanup()
@@ -111,7 +118,7 @@ def close_panel(verify=True, timeout=8.0):
         if worker_edits_on_win() <= 1:
             return True
         send_keys("{ESC}")
-        time.sleep(0.8)
+        time.sleep(2.0)
     return worker_edits_on_win() <= 1
 
 
@@ -361,14 +368,16 @@ def menu(*titles):
                 time.sleep(0.35)
         send_keys("{ENTER}")
         time.sleep(1.1)
+    if not dialog_present():
+        click_editor()   # 菜单操作后焦点常留在菜单栏，点回编辑区
 
 
 def texts():
     return worker_texts()
 
 
-def status_has(exact=None, contains=None, timeout=8.0):
-    """轮询重试，等界面/菜单操作落盘后再断言"""
+def status_has(exact=None, contains=None, timeout=12.0):
+    """轮询重试，等界面/菜单操作落盘后再断言（间隔 2 秒，降低读取进程密度）"""
     t0 = time.time()
     ts = []
     while True:
@@ -383,7 +392,7 @@ def status_has(exact=None, contains=None, timeout=8.0):
             if exact is not None:
                 raise AssertionError(f"状态栏没有精确项[{exact}]，当前: {ts[:20]}")
             raise AssertionError(f"状态栏没有包含[{contains}]，当前: {ts[:20]}")
-        time.sleep(1.0)
+        time.sleep(2.0)
 
 
 def click_editor():
@@ -417,10 +426,23 @@ def editor_clipboard():
     return pyperclip.paste()
 
 
+def dialog_present():
+    """是否有打开/保存类系统对话框（#32770）"""
+    try:
+        import win32gui
+        return bool(win32gui.FindWindow("#32770", None))
+    except Exception:
+        return False
+
+
 def picker_typing(path, wait=3.0):
-    time.sleep(wait)
-    send_keys(path, with_spaces=True)
-    time.sleep(0.5)
+    t0 = time.time()
+    while not dialog_present() and time.time() - t0 < 10:
+        time.sleep(0.5)
+    time.sleep(1.0)          # 等文件名框就绪，避免开头字符丢失
+    pyperclip.copy(path)
+    send_keys("^v")          # 整段粘贴，杜绝逐键输入被吞
+    time.sleep(0.8)
     send_keys("{ENTER}")
     time.sleep(1.5)
     # 已存在替换确认框：键入回车默认=是
@@ -602,15 +624,19 @@ def c_find_panel():
     send_keys("^f")
     time.sleep(1.0)
     send_keys("apple")
-    time.sleep(0.4)
-    send_keys("{ENTER}")
-    time.sleep(0.7)
-    status_has(contains="列 4")   # 第一个 apple 在第 4 列
-    send_keys("{F3}")
-    time.sleep(0.7)
-    status_has(contains="列 13")  # 第二个 apple 在第 13 列
+    time.sleep(0.5)
+    # 输入后可能已自动定位首个匹配（光标显示在选中串末尾，列 9）；
+    # 未定位则回车触发查找。第五轮截图证实：第二个匹配显示 列 18。
+    if not col_seen([8, 9], 3.0):
+        send_keys("{ENTER}")
+        time.sleep(0.8)
+    assert col_seen([8, 9]), "状态栏未显示首个匹配位置"
+    send_keys("{ENTER}")          # 下一个匹配
+    time.sleep(0.8)
+    assert col_seen([18]), "状态栏未显示第二个匹配位置"
     send_keys("+{F3}")            # 查找上一个
-    time.sleep(0.6)
+    time.sleep(0.8)
+    assert col_seen([8, 9]), "反向查找未回到首个匹配"
     shot("case-find-panel")
     close_panel()
     click_editor()
@@ -680,14 +706,26 @@ def c_find_in_files():
     close_panel()
 
 
+def col_seen(cols, timeout=8.0):
+    """状态栏出现任一目标列号（光标显示在选中串末尾，列号按截图口径）"""
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        for t in texts():
+            for c in cols:
+                if f"列 {c}" in t:
+                    return True
+        time.sleep(2.0)
+    return False
+
+
 def zoom_val():
     t0 = time.time()
-    while time.time() - t0 < 8.0:
+    while time.time() - t0 < 12.0:
         for t in texts():
             m = re.fullmatch(r"(\d{2,3})%", t.strip())
             if m:
                 return int(m.group(1))
-        time.sleep(1.0)
+        time.sleep(2.0)
     raise AssertionError("状态栏没有缩放百分比: " + str(texts()[:20]))
 
 
@@ -888,15 +926,20 @@ def c_exit():
     close_panel()
     menu("文件", "全部保存")      # 退出前先落盘，避免未保存确认框卡住流程
     time.sleep(1.0)
+    if dialog_present():          # 未命名的标签会弹另存为，补一个落盘路径
+        picker_typing(os.path.join(DOCS, "taopad-exit-save.txt"))
+        time.sleep(0.8)
     menu("文件", "退出")
     still = True
     t0 = time.time()
-    while still and time.time() - t0 < 10:
+    while still and time.time() - t0 < 12:
         out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq TaoPad.exe"], capture_output=True, text=True)
         still = "TaoPad.exe" in out.stdout
         if still:
+            if dialog_present():  # 保存/退出确认框：回车默认确认
+                send_keys("{ENTER}")
             time.sleep(1.0)
-    assert not still, "退出后进程仍在（等待10秒）"
+    assert not still, "退出后进程仍在（等待12秒）"
     assert wer_count() == wer_before, "退出过程出现新崩溃记录"
     shot("case-exit")
 
