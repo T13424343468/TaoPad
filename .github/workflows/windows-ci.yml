@@ -30,10 +30,31 @@ jobs:
           dotnet publish src/AntPad/AntPad.csproj -c Release -r win-x64
           --self-contained true -p:WindowsAppSDKSelfContained=true -p:Platform=x64
 
-      - name: 上传构建产物
+      - name: 定位发布目录
+        shell: pwsh
+        run: |
+          $pub = Get-ChildItem -Directory -Recurse -Path src/AntPad/bin/x64/Release |
+                 Where-Object { $_.Name -eq 'publish' -and (Test-Path (Join-Path $_.FullName 'TaoPad.exe')) } |
+                 Select-Object -First 1
+          if (-not $pub) { throw "没找到含 TaoPad.exe 的 publish 目录" }
+          "PUBLISH_DIR=$($pub.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "发布目录: $($pub.FullName)"
+
+      - name: 打包 MSI（WiX 6 自动安装 + 构建后自检）
+        shell: pwsh
+        run: ./tools/msi/package.ps1 -PublishDir "$env:PUBLISH_DIR" -OutDir out -WxsPath src/Installer/Package.wxs
+
+      - name: out 清单自检（应只有 1 个 msi）
+        shell: pwsh
+        run: |
+          $msis = Get-ChildItem out -Filter *.msi
+          Write-Host "out 目录清单:"; $msis | ForEach-Object { Write-Host $_.Name }
+          if ($msis.Count -ne 1) { throw "out 里 msi 数量不对: $($msis.Count)" }
+
+      - name: 上传 MSI 安装包
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: taopad-build-output
-          path: src/AntPad/bin/x64/Release/publish/
+          name: taopad-msi-installer
+          path: out/*.msi
           retention-days: 14
