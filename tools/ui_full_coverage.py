@@ -189,7 +189,7 @@ def worker_main(argv):
             except Exception:
                 continue
         print("NOTFOUND")
-    elif mode in ("read_texts", "count_edits", "has_edit", "menu_item_visible"):
+    elif mode in ("read_texts", "count_edits", "has_edit", "menu_item_visible", "menu_invoke"):   # v16：白名单漏了 menu_invoke，内层分支从未可达（第十二轮空回音、第十三轮只有进门回执的根因）
         h = int(argv[1])
         title = argv[2] if mode == "menu_item_visible" else None
         # v11：去掉 ALT 置前——按下并释放 ALT 会把应用切进菜单模式，
