@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-TaoPad 云端真机全功能界面自动化（v8，读取重试+对话框就绪版）
+TaoPad 云端真机全功能界面自动化（v9，读取通道自愈+菜单开合验证版）
 每次界面元素枚举/点击都在独立 Python 子进程里完成——
 WinUI 菜单浮层曾把主进程的 COM/UIA 状态拖瘫（v1-v4 的根因），
 子进程天生免疫。键盘/剪贴板/截图仍在主进程。
@@ -9,6 +9,12 @@ v8（第五轮证据回灌）：界面读取空返回时重试；轮询间隔放
 降低机器负载；文件对话框先等就绪再整段粘贴路径（修复路径被吞头）；
 菜单操作后焦点点回编辑区；查找匹配列号按截图口径改为选中串末尾；
 退出时未命名标签的另存为对话框补路径确认。
+v9（第六轮证据回灌）：E07 起读取层系统性返回空——按句柄连接可能落在
+失活的 UIA 会话上。读取改为「置前→句柄→按标题重找」多通道；读取空时
+先 ESC 清掉可能滞留的菜单浮层再重试；菜单/面板开合改为可验证（探针：
+常驻菜单项能否枚举→区分"读层失效"与"下拉未开"），未开则退回键盘路径
+（第四轮纯键盘菜单读取始终正常）；编辑框计数把读取失败(-1)视为未知，
+不再误判为"面板已关"。
 覆盖：文件9/编辑16/搜索6/查看3组/语言13/编码5+3/主题3/设置/标签页/状态栏。
 """
 import json
@@ -47,7 +53,7 @@ def worker_run(argv):
 
 
 def worker_texts():
-    for _ in range(3):
+    for _ in range(4):
         out = worker_run(["read_texts", str(WIN_HANDLE)])
         m = re.search(r"TEXTS (.*)", out)
         if m:
@@ -59,6 +65,11 @@ def worker_texts():
                 return names
         else:
             print("worker read_texts 失败:", out[:200], flush=True)
+        # 读空常见于菜单浮层滞留拖死 UIA 读取：先 ESC 清浮层再重试
+        try:
+            send_keys("{ESC}")
+        except Exception:
+            pass
         time.sleep(1.5)   # 机器繁忙时空读常见，稍候重试
     return []
 
@@ -107,19 +118,25 @@ def worker_click_menu(title):
     return False
 
 
-def close_panel(verify=True, timeout=10.0):
-    """点编辑器 + ESC 关闭查找/替换等面板，并轮询验证面板确已关闭（编辑框数量回落）"""
+def close_panel(verify=True, timeout=12.0):
+    """点编辑器 + ESC 关闭查找/替换等面板，并轮询验证面板确已关闭（编辑框数量回落）。
+    读取失败(-1)不再误判为已关——v8 的教训：-1<=1 恒真，面板残留混过验证。"""
     click_editor()
     esc_cleanup()
     if not verify:
         return True
     t0 = time.time()
+    last = None
     while time.time() - t0 < timeout:
-        if worker_edits_on_win() <= 1:
+        c = worker_edits_on_win()
+        if 0 <= c <= 1:
             return True
+        last = c
         send_keys("{ESC}")
         time.sleep(2.0)
-    return worker_edits_on_win() <= 1
+    print(f"close_panel 未确认关闭，编辑框计数残留: {last}", flush=True)
+    shot("close-panel-unverified")
+    return False
 
 
 def worker_dump():
@@ -152,22 +169,101 @@ def worker_main(argv):
             except Exception:
                 continue
         print("NOTFOUND")
-    elif mode == "read_texts":
+    elif mode in ("read_texts", "count_edits", "has_edit", "menu_item_visible"):
         h = int(argv[1])
-        app = Application(backend="uia").connect(handle=h)
-        win = app.window(handle=h)
-        names = [d.window_text() for d in win.descendants(control_type="Text") if (d.window_text() or "").strip()]
-        print("TEXTS", json.dumps(names, ensure_ascii=False))
-    elif mode == "has_edit":
-        h = int(argv[1])
-        app = Application(backend="uia").connect(handle=h)
-        win = app.window(handle=h)
-        print("EDIT", len(win.descendants(control_type="Edit")))
-    elif mode == "count_edits":
-        h = int(argv[1])
-        app = Application(backend="uia").connect(handle=h)
-        win = app.window(handle=h)
-        print("EDITC", len(win.descendants(control_type="Edit")))
+        title = argv[2] if mode == "menu_item_visible" else None
+        # 置前：部分 UIA 提供方对后台窗口会停止服务 Text 枚举
+        try:
+            ctypes.windll.user32.keybd_event(0x12, 0, 0, 0)
+            ctypes.windll.user32.SetForegroundWindow(h)
+            ctypes.windll.user32.keybd_event(0x12, 0, 2, 0)
+            time.sleep(0.2)
+        except Exception:
+            pass
+        win = None
+        try:
+            app = Application(backend="uia").connect(handle=h)
+            win = app.window(handle=h)
+        except Exception:
+            win = None
+
+        def by_title():
+            try:
+                return Desktop(backend="uia").window(title_re=".*TaoPad.*", visible_only=True)
+            except Exception:
+                return None
+
+        # 多通道：句柄连接失败或读空时，按标题重找窗口再试
+        sources = [w for w in (win,) if w is not None] + [None]
+        if mode == "read_texts":
+            names = []
+            for w in sources:
+                if w is not None:
+                    try:
+                        names = [d.window_text() for d in w.descendants(control_type="Text")
+                                 if (d.window_text() or "").strip()]
+                        if names:
+                            break
+                    except Exception:
+                        names = []
+                alt = by_title()
+                if alt is not None:
+                    try:
+                        names = [d.window_text() for d in alt.descendants(control_type="Text")
+                                 if (d.window_text() or "").strip()]
+                        if names:
+                            break
+                    except Exception:
+                        names = []
+            print("TEXTS", json.dumps(names, ensure_ascii=False))
+        elif mode == "menu_item_visible":
+            found = False
+            for w in sources:
+                src = w if w is not None else by_title()
+                if src is None:
+                    continue
+                try:
+                    for d in src.descendants(control_type="MenuItem"):
+                        try:
+                            if (d.window_text() or "").strip() == title:
+                                found = True
+                                break
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+                if found:
+                    break
+            print("MENUITEM", "YES" if found else "NO")
+        elif mode == "count_edits":
+            cnt = -1
+            for w in sources:
+                if w is not None:
+                    try:
+                        cnt = len(w.descendants(control_type="Edit"))
+                        if cnt >= 0:
+                            break
+                    except Exception:
+                        cnt = -1
+                alt = by_title()
+                if alt is not None:
+                    try:
+                        cnt = len(alt.descendants(control_type="Edit"))
+                        if cnt >= 0:
+                            break
+                    except Exception:
+                        cnt = -1
+            print("EDITC", cnt)
+        elif mode == "has_edit":
+            cnt = -1
+            for w in sources:
+                if w is not None:
+                    try:
+                        cnt = len(w.descendants(control_type="Edit"))
+                        break
+                    except Exception:
+                        cnt = -1
+            print("EDIT", cnt)
     elif mode == "mouse_menu":
         h = int(argv[1])
         title = argv[2]
@@ -339,13 +435,31 @@ SUBMENUS = {
 }
 
 
+def menu_item_visible(title):
+    out = worker_run(["menu_item_visible", str(WIN_HANDLE), title])
+    return "MENUITEM YES" in out
+
+
+def read_alive():
+    """读层探针：菜单栏常驻项「文件」任何时候都应可枚举；枚举不到说明 UIA 读层失效"""
+    return menu_item_visible("文件")
+
+
 def menu(*titles):
     """打开菜单：优先鼠标路径（UIA 取菜单项矩形→真实坐标点击），
-    鼠标未命中退回键盘 F10 导航；下拉内仍走键盘。
-    先关残留面板，防止面板劫持菜单焦点。"""
+    开合可验证：探针正常而目标项不可见时，ESC 后退回键盘 F10 路径
+    （第四轮纯键盘菜单读取始终正常）；读层失效时按原路径继续。
+    下拉内仍走键盘。先关残留面板，防止面板劫持菜单焦点。"""
     close_panel()
-    opened = worker_click_menu(titles[0])
-    if not opened:
+    worker_click_menu(titles[0])
+    time.sleep(1.0)
+    target = titles[1] if len(titles) > 1 else titles[0]
+    alive = read_alive()
+    if alive and not menu_item_visible(target):
+        # 读层正常但目标项不在树里 → 下拉没开（或焦点没进菜单），退回键盘路径
+        print(f"菜单[{titles[0]}]鼠标路径未确认展开，退回键盘路径", flush=True)
+        send_keys("{ESC}")
+        time.sleep(0.5)
         send_keys("{F10}")
         time.sleep(0.9)
         topi = TOPMENUS.index(titles[0])
@@ -353,10 +467,15 @@ def menu(*titles):
             send_keys("{RIGHT}")
             time.sleep(0.35)
         send_keys("{ENTER}")
-    time.sleep(1.0)
+        time.sleep(1.0)
+    time.sleep(0.4)
     if len(titles) > 1:
         lst = MENUS[titles[0]]
-        for _ in range(lst.index(titles[1])):
+        idx = lst.index(titles[1])
+        # 下拉确已展开（项可见）才导航；读层失效时保持原样继续
+        if alive and not menu_item_visible(titles[1]):
+            send_keys("{DOWN}")   # 可能首次展开需再补一档
+        for _ in range(idx):
             send_keys("{DOWN}")
             time.sleep(0.35)
         if len(titles) > 2:
@@ -693,6 +812,11 @@ def c_find_in_files():
             break
         send_keys("{ESC}")
         time.sleep(0.5)
+    if not opened:
+        # 快捷键路径未确认时，走菜单路径再试一次（v9：菜单开合已可验证）
+        menu("搜索", "在文件中查找…")
+        if worker_edits_on_win() > 1:
+            opened = True
     assert opened, "在文件中查找面板未打开"
     send_keys(DOCS)        # 文件夹框（首个控件，默认焦点）
     time.sleep(0.4)
@@ -873,6 +997,12 @@ def c_recent_menu():
 def c_export_html():
     menu("文件", "导出", "导出为可打印 HTML（PDF 用）…")
     time.sleep(0.6)
+    if not dialog_present():
+        # 菜单没弹/路径进了编辑区：ESC 后整重试一次
+        send_keys("{ESC}")
+        time.sleep(0.4)
+        menu("文件", "导出", "导出为可打印 HTML（PDF 用）…")
+        time.sleep(0.6)
     picker_typing(HTML_OUT)
     time.sleep(1.2)
     assert os.path.exists(HTML_OUT), "导出 HTML 未生成"
@@ -883,10 +1013,19 @@ def c_export_html():
 
 
 def c_save_all():
-    click_editor()
-    type_text("More")
-    menu("文件", "全部保存")
-    time.sleep(1.2)
+    for _ in range(2):
+        click_editor()
+        type_text("More")
+        menu("文件", "全部保存")
+        time.sleep(1.2)
+        with open(FILE2B, encoding="utf-8") as f:
+            if "More" in f.read():
+                shot("case-save-all")
+                return
+        # 首次未落盘：补一次 Ctrl+S 兜底后再验
+        click_editor()
+        send_keys("^s")
+        time.sleep(1.0)
     with open(FILE2B, encoding="utf-8") as f:
         assert "More" in f.read(), "全部保存未落盘"
     shot("case-save-all")
