@@ -462,19 +462,19 @@ def _open_top_keyboard(t):
 
 
 def menu(*titles):
-    """键盘路径为主（键盘路径七轮里读层始终正常）。F10 聚焦菜单条→方向键
-    到目标→回车展开→下拉内键盘导航。v11：打开后探针验证目标项可见，
-    未开 ESC 后重试一次（ALT 置前干扰已去除，探针不再拖累菜单焦点）。
-    先关残留面板，防止面板劫持焦点。"""
+    """键盘路径为主。F10 聚焦菜单条→方向键→回车展开→下拉内键盘导航。
+    v12：撤掉 v11 的探针 ESC 重试——第九轮实证下拉项在 WinUI3 弹窗层，
+    主窗口 UIA 枚举不到，探针永远误报「未确认展开」（连事后通过了的
+    查看/主题用例也在报），且探针里的 ESC 会把开好的菜单再关掉。"""
     close_panel()
-    for attempt in range(2):
-        _open_top_keyboard(titles[0])
-        target = titles[1] if len(titles) > 1 else titles[0]
-        if not read_alive() or menu_item_visible(target):
-            break
-        print(f"菜单[{titles[0]}]键盘路径未确认展开，重试一次", flush=True)
-        send_keys("{ESC}")
-        time.sleep(0.5)
+    send_keys("{F10}")
+    time.sleep(0.9)
+    topi = TOPMENUS.index(titles[0])
+    for _ in range(topi):
+        send_keys("{RIGHT}")
+        time.sleep(0.35)
+    send_keys("{ENTER}")
+    time.sleep(1.0)
     if len(titles) > 1:
         lst = MENUS[titles[0]]
         for _ in range(lst.index(titles[1])):
@@ -546,6 +546,19 @@ def editor_clipboard():
     send_keys("^c")
     time.sleep(0.4)
     return pyperclip.paste()
+
+
+def focus_main():
+    """v12：把主窗口拉回前台再发键。v10 的 ALT 置前曾靠每个读取进程反复
+    SetForegroundWindow 顺手锚定焦点，v11 撤掉后保存/打开链路失焦红掉
+    （O01-O04 连锁）。改用 pywinauto set_focus（AttachThreadInput 实现，
+    不像 ALT 按放会把应用切进菜单模式）。"""
+    try:
+        from pywinauto import Application
+        Application(backend="uia").connect(handle=WIN_HANDLE).window(handle=WIN_HANDLE).set_focus()
+        time.sleep(0.3)
+    except Exception:
+        pass
 
 
 def dialog_present():
@@ -947,10 +960,12 @@ def c_languages():
 
 
 def c_save():
+    focus_main()
     click_editor()
     esc_cleanup()
     send_keys("^a{DEL}")
     type_text("save-me-内容")
+    focus_main()
     send_keys("^s")
     time.sleep(0.6)
     picker_typing(FILE1)
@@ -960,6 +975,7 @@ def c_save():
 
 def c_open():
     esc_cleanup()
+    focus_main()
     send_keys("^o")
     time.sleep(0.6)
     picker_typing(FILE1)
@@ -970,8 +986,10 @@ def c_open():
 
 
 def c_save_as():
+    focus_main()
     click_editor()
     type_text(" extra")
+    focus_main()
     send_keys("^+{S}")
     time.sleep(0.6)
     picker_typing(FILE2B)
@@ -1033,6 +1051,7 @@ def c_save_all():
                 shot("case-save-all")
                 return
         # 首次未落盘：补一次 Ctrl+S 兜底后再验
+        focus_main()
         click_editor()
         send_keys("^s")
         time.sleep(1.0)
