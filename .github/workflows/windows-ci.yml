@@ -64,29 +64,31 @@ jobs:
             $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
             $g.Dispose(); $bmp.Dispose()
           }
+          function Find-AppExe {
+            $regKey = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*","HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+                      Where-Object { $_.DisplayName -like "*TaoPad*" } | Select-Object -First 1
+            if ($regKey -and $regKey.InstallLocation -and (Test-Path (Join-Path $regKey.InstallLocation "TaoPad.exe"))) {
+              return (Join-Path $regKey.InstallLocation "TaoPad.exe")
+            }
+            foreach ($d in (Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free }).Root) {
+              $cand = Join-Path $d "Program Files\TaoPad\TaoPad.exe"
+              if (Test-Path $cand) { return $cand }
+            }
+            foreach ($d in (Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free }).Root) {
+              $pf = Join-Path $d "Program Files"
+              if (Test-Path $pf) {
+                $hit = Get-ChildItem $pf -Recurse -Depth 3 -Filter TaoPad.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($hit) { return $hit.FullName }
+              }
+            }
+            return $null
+          }
           $msi = (Resolve-Path out/*.msi).Path
           $p = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart","/l*v","evidence\install.log" -Wait -PassThru
           Write-Host "msiexec 退出码: $($p.ExitCode)"
           if ($p.ExitCode -ne 0) { throw "静默安装失败，退出码 $($p.ExitCode)" }
-          $appExe = $null
-          $regKey = Get-ItemProperty "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*","HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue |
-                    Where-Object { $_.DisplayName -like "*TaoPad*" } | Select-Object -First 1
-          if ($regKey -and $regKey.InstallLocation -and (Test-Path (Join-Path $regKey.InstallLocation "TaoPad.exe"))) {
-            $appExe = Join-Path $regKey.InstallLocation "TaoPad.exe"
-          }
-          if (-not $appExe) {
-            foreach ($d in (Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free }).Root) {
-              $cand = Join-Path $d "Program Files\\TaoPad\\TaoPad.exe"
-              if (Test-Path $cand) { $appExe = $cand; break }
-            }
-          }
-          if (-not $appExe) {
-            foreach ($d in (Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free }).Root) {
-              $hit = Get-ChildItem (Join-Path $d "Program Files") -Recurse -Depth 3 -Filter TaoPad.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-              if ($hit) { $appExe = $hit.FullName; break }
-            }
-          }
-          if (-not $appExe) { throw "安装后常规位置都找不到 TaoPad.exe" }
+          $appExe = Find-AppExe
+          if (-not $appExe) { throw "安装后所有常规盘符都找不到 TaoPad.exe" }
           Write-Host "安装位置: $appExe"
           Start-Process $appExe
           Start-Sleep -Seconds 15
@@ -112,18 +114,27 @@ jobs:
             $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
             $g.Dispose(); $bmp.Dispose()
           }
-          $appExe = $null
-          $regKey = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*","HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
-                    Where-Object { $_.DisplayName -like "*TaoPad*" } | Select-Object -First 1
-          if ($regKey -and $regKey.InstallLocation -and (Test-Path (Join-Path $regKey.InstallLocation "TaoPad.exe"))) {
-            $appExe = Join-Path $regKey.InstallLocation "TaoPad.exe"
+          function Find-AppExe2 {
+            $regKey = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*","HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+                      Where-Object { $_.DisplayName -like "*TaoPad*" } | Select-Object -First 1
+            if ($regKey -and $regKey.InstallLocation -and (Test-Path (Join-Path $regKey.InstallLocation "TaoPad.exe"))) {
+              return (Join-Path $regKey.InstallLocation "TaoPad.exe")
+            }
+            foreach ($d in (Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free }).Root) {
+              $cand = Join-Path $d "Program Files\TaoPad\TaoPad.exe"
+              if (Test-Path $cand) { return $cand }
+            }
+            foreach ($d in (Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free }).Root) {
+              $pf = Join-Path $d "Program Files"
+              if (Test-Path $pf) {
+                $hit = Get-ChildItem $pf -Recurse -Depth 3 -Filter TaoPad.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($hit) { return $hit.FullName }
+              }
+            }
+            return $null
           }
-          if (-not $appExe -and (Test-Path "C:\Program Files\TaoPad\TaoPad.exe")) { $appExe = "C:\Program Files\TaoPad\TaoPad.exe" }
-          if (-not $appExe) {
-            $hit = Get-ChildItem "C:\Program Files" -Recurse -Depth 3 -Filter TaoPad.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($hit) { $appExe = $hit.FullName }
-          }
-          if (-not $appExe) { throw "安装后常规位置都找不到 TaoPad.exe" }
+          $appExe = Find-AppExe2
+          if (-not $appExe) { throw "攻击视角找不到已安装的 TaoPad.exe" }
           Write-Host "攻击视角安装位置: $appExe"
           $werBefore = @(Get-ChildItem "$env:LOCALAPPDATA\Microsoft\Windows\WER" -Recurse -ErrorAction SilentlyContinue | Where-Object Name -like "*TaoPad*").Count
           Start-Process $appExe -ArgumentList "--attack=$('A'*4096)"
