@@ -1,4 +1,4 @@
-# 生成 TaoPad 的微信风格安装器 (.msi)
+﻿# 生成 TaoPad 的微信风格安装器 (.msi)
 # 单页界面：许可勾选 + 安装目录(可自由修改) + 快捷方式/右键菜单/文件关联可勾选
 # 用法: powershell -File package.ps1 -PublishDir <publish目录> -OutDir <out目录> [-WxsPath <安装定义>]
 param(
