@@ -1,0 +1,9 @@
+name: diag
+on:
+  workflow_dispatch: {}
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: echo
+        run: echo ok
