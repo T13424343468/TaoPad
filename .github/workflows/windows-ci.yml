@@ -50,6 +50,14 @@ jobs:
           if ($msis.Count -ne 1) { throw "out 里 msi 数量不对: $($msis.Count)" }
           Write-Host "MSI SHA256: $((Get-FileHash $msis[0].FullName -Algorithm SHA256).Hash)"
 
+      - name: 上传安装包（交付用）
+        uses: actions/upload-artifact@v4
+        with:
+          name: TaoPad-installer
+          path: out/*.msi
+          if-no-files-found: error
+          retention-days: 30
+
       - name: 真实用户视角（静默安装→启动→稳定运行→截图）
         shell: pwsh
         run: |
