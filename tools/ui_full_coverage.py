@@ -475,9 +475,19 @@ def shot(name):
     return p
 
 
+def flush_report():
+    try:
+        report = {"cases": RESULTS, "total": len(RESULTS),
+                  "failed": [r["case"] for r in RESULTS if r["result"] == "FAIL"]}
+        with open(os.path.join(EVID, "report.json"), "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("flush_report失败", e, flush=True)
+
 def record(name, ok, detail=""):
     RESULTS.append({"case": name, "result": "PASS" if ok else "FAIL", "detail": detail})
     print(("[PASS] " if ok else "[FAIL] ") + name + (("  --  " + detail) if detail else ""), flush=True)
+    flush_report()
 
 
 def case(name, fn):
@@ -1363,8 +1373,19 @@ def main():
         print(f"半场 {part}：{len(sel)} 用例", flush=True)
     else:
         sel = ALL_CASES
-    for name, fn in sel:
-        case(name, fn)
+    try:
+        for name, fn in sel:
+            case(name, fn)
+    except Exception:
+        import traceback
+        tb = traceback.format_exc()
+        print(tb, flush=True)
+        try:
+            with open(os.path.join(EVID, "crash.txt"), "w", encoding="utf-8") as f:
+                f.write(tb)
+        except Exception:
+            pass
+        sys.exit(2)
 
     report = {"cases": RESULTS, "total": len(RESULTS),
               "failed": [r["case"] for r in RESULTS if r["result"] == "FAIL"]}
