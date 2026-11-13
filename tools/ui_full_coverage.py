@@ -1325,36 +1325,46 @@ def main():
     time.sleep(1)
     worker_dump()
 
-    case("S01 启动就绪与状态栏", c_startup)
-    case("O08a 新建标签", c_new_tab)
-    case("E01 输入/全选/复制/撤销/重做", c_type_undo_redo)
-    case("E02 剪切/粘贴", c_cut_copy_paste)
-    case("E03 插入时间日期(F5)", c_insert_time)
-    case("E04 行操作(复制/上移/下移/删除)", c_line_ops)
-    case("E05 大小写转换", c_case_convert)
-    case("E06 格式化文档", c_format)
-    case("E07 注释/取消注释(菜单)", c_comment)
-    case("F01 查找面板/F3/F3反向", c_find_panel)
-    case("F02 替换面板", c_replace_panel)
-    case("F03 转到行", c_goto)
-    case("F04 在文件中查找", c_find_in_files)
-    case("V01 缩放(放大/缩小/复位)", c_zoom)
-    case("V02 自动换行切换", c_wrap_toggle)
-    case("V03 显示行号切换", c_lineno_toggle)
-    case("T01 主题三套切换", c_themes)
-    case("C01 保存编码5种", c_encodings)
-    case("C02 换行符3种", c_eols)
-    case("L01 语言13种逐一切换", c_languages)
-    case("O01 保存(Ctrl+S→选择器)", c_save)
-    case("O02 打开(Ctrl+O→选择器)", c_open)
-    case("O03 另存为", c_save_as)
-    case("O04 全部保存", c_save_all)
-    case("O05 最近文件菜单", c_recent_menu)
-    case("O06 导出可打印HTML", c_export_html)
-    case("O07 标签页新增/切换/关闭", c_tabs_and_close)
-    case("T02 设置对话框(开关+主题+应用)", c_settings)
-    case("O08b 鼠标路径菜单对照", c_mouse_menu)
-    case("O09 正常退出+崩溃检查", c_exit)
+    ALL_CASES = [
+        ("S01 启动就绪与状态栏", c_startup),
+        ("O08a 新建标签", c_new_tab),
+        ("E01 输入/全选/复制/撤销/重做", c_type_undo_redo),
+        ("E02 剪切/粘贴", c_cut_copy_paste),
+        ("E03 插入时间日期(F5)", c_insert_time),
+        ("E04 行操作(复制/上移/下移/删除)", c_line_ops),
+        ("E05 大小写转换", c_case_convert),
+        ("E06 格式化文档", c_format),
+        ("E07 注释/取消注释(菜单)", c_comment),
+        ("F01 查找面板/F3/F3反向", c_find_panel),
+        ("F02 替换面板", c_replace_panel),
+        ("F03 转到行", c_goto),
+        ("F04 在文件中查找", c_find_in_files),
+        ("V01 缩放(放大/缩小/复位)", c_zoom),
+        ("V02 自动换行切换", c_wrap_toggle),
+        ("V03 显示行号切换", c_lineno_toggle),
+        ("T01 主题三套切换", c_themes),
+        ("C01 保存编码5种", c_encodings),
+        ("C02 换行符3种", c_eols),
+        ("L01 语言13种逐一切换", c_languages),
+        ("O01 保存(Ctrl+S→选择器)", c_save),
+        ("O02 打开(Ctrl+O→选择器)", c_open),
+        ("O03 另存为", c_save_as),
+        ("O04 全部保存", c_save_all),
+        ("O05 最近文件菜单", c_recent_menu),
+        ("O06 导出可打印HTML", c_export_html),
+        ("O07 标签页新增/切换/关闭", c_tabs_and_close),
+        ("T02 设置对话框(开关+主题+应用)", c_settings),
+        ("O08b 鼠标路径菜单对照", c_mouse_menu),
+        ("O09 正常退出+崩溃检查", c_exit),
+    ]
+    part = (sys.argv[1] if len(sys.argv) > 1 else "").upper()
+    if part in ("A", "B"):
+        sel = ALL_CASES[:14] if part == "A" else ALL_CASES[14:]
+        print(f"半场 {part}：{len(sel)} 用例", flush=True)
+    else:
+        sel = ALL_CASES
+    for name, fn in sel:
+        case(name, fn)
 
     report = {"cases": RESULTS, "total": len(RESULTS),
               "failed": [r["case"] for r in RESULTS if r["result"] == "FAIL"]}
