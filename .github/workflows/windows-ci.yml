@@ -4,11 +4,13 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch: {}
+  schedule:
+    - cron: '30 18 * * *'
 
 jobs:
   build-and-test:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 110
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -166,6 +168,90 @@ jobs:
           python -m pip install --quiet --disable-pip-version-check pywinauto pillow pyperclip
           $env:PYTHONIOENCODING='utf-8'
           python tools/ui_full_coverage.py
+
+      - name: 升级与回滚路径（覆盖安装→静默卸载→重装验证）
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          function Snap($path) {
+            $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size)
+            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose(); $bmp.Dispose()
+          }
+          $msi = (Resolve-Path out/*.msi).Path
+          $p1 = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart" -Wait -PassThru
+          if ($p1.ExitCode -ne 0) { throw "覆盖安装失败，退出码 $($p1.ExitCode)" }
+          Write-Host "覆盖安装退出码: $($p1.ExitCode)"
+          $p2 = Start-Process msiexec.exe -ArgumentList "/x","`"$msi`"","/qn","/norestart" -Wait -PassThru
+          if ($p2.ExitCode -ne 0) { throw "静默卸载失败，退出码 $($p2.ExitCode)" }
+          Start-Sleep -Seconds 3
+          $gone = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*","HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+                  Where-Object { $_.DisplayName -like "*TaoPad*" }
+          if ($gone) { throw "卸载后注册表仍有残留条目" }
+          Write-Host "卸载校验：注册表无残留"
+          $p3 = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart" -Wait -PassThru
+          if ($p3.ExitCode -ne 0) { throw "重装失败，退出码 $($p3.ExitCode)" }
+          Start-Sleep -Seconds 5
+          Snap "evidence\l8-reinstall.png"
+          Write-Host "升级与回滚路径：覆盖安装、静默卸载、重装均通过"
+
+      - name: 长稳浸泡 30 分钟（自动班：定时/手动触发）
+        if: github.event_name != 'push'
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          function Snap($path) {
+            $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size)
+            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose(); $bmp.Dispose()
+          }
+          function Find-AppExeSoak {
+            $regKey = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*","HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+                      Where-Object { $_.DisplayName -like "*TaoPad*" } | Select-Object -First 1
+            if ($regKey -and $regKey.InstallLocation -and (Test-Path (Join-Path $regKey.InstallLocation "TaoPad.exe"))) {
+              return (Join-Path $regKey.InstallLocation "TaoPad.exe")
+            }
+            foreach ($d in (Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free }).Root) {
+              $cand = Join-Path $d "Program Files\TaoPad\TaoPad.exe"
+              if (Test-Path $cand) { return $cand }
+            }
+            foreach ($d in (Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free }).Root) {
+              $pf = Join-Path $d "Program Files"
+              if (Test-Path $pf) {
+                $hit = Get-ChildItem $pf -Recurse -Depth 3 -Filter TaoPad.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($hit) { return $hit.FullName }
+              }
+            }
+            return $null
+          }
+          $appExe = Find-AppExeSoak
+          if (-not $appExe) { throw "浸泡前找不到已安装的 TaoPad.exe" }
+          Write-Host "浸泡目标: $appExe"
+          Start-Process $appExe
+          Start-Sleep -Seconds 15
+          if (-not (Get-Process TaoPad -ErrorAction SilentlyContinue)) { throw "浸泡启动失败，进程不在" }
+          $minutes = 0
+          while ($minutes -lt 30) {
+            Start-Sleep -Seconds 60
+            $minutes++
+            if (-not (Get-Process TaoPad -ErrorAction SilentlyContinue)) { throw "浸泡第 $minutes 分钟进程退出，长稳不过" }
+            if ($minutes % 10 -eq 0) {
+              Snap "evidence\soak-$minutes.png"
+              $sz = (Get-Item "evidence\soak-$minutes.png").Length
+              if ($sz -lt 20000) { throw "第 $minutes 分钟截图疑似空白（$sz 字节），视觉回归不过" }
+              Write-Host "浸泡 ${minutes}/30 分钟存活，截图 ${sz} 字节"
+            }
+          }
+          Get-Process TaoPad -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Write-Host "长稳浸泡 30 分钟通过，三张留证截图非空白"
 
       - name: 上传测试证据与安装包
         if: always()
