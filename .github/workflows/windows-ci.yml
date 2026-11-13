@@ -8,9 +8,10 @@ on:
     - cron: '30 18 * * *'
 
 jobs:
-  build-and-test:
+  # 作业 1：编译与打包（快速失败，产物交付）
+  build:
     runs-on: windows-latest
-    timeout-minutes: 110
+    timeout-minutes: 60
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -60,6 +61,21 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # 作业 2：真实用户视角（独立 runner，单班死亡不牵连其他视角）
+  user-view:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载安装包
+        uses: actions/download-artifact@v4
+        with:
+          name: TaoPad-installer
+          path: out
+
       - name: 真实用户视角（静默安装→启动→稳定运行→截图）
         shell: pwsh
         run: |
@@ -74,6 +90,10 @@ jobs:
             $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
             $g.Dispose(); $bmp.Dispose()
           }
+          $msi = (Resolve-Path out/*.msi).Path
+          $p = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart","/l*v","evidence\install.log" -Wait -PassThru
+          Write-Host "msiexec 退出码: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { throw "静默安装失败，退出码 $($p.ExitCode)" }
           function Find-AppExe {
             $regKey = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*","HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
                       Where-Object { $_.DisplayName -like "*TaoPad*" } | Select-Object -First 1
@@ -93,10 +113,6 @@ jobs:
             }
             return $null
           }
-          $msi = (Resolve-Path out/*.msi).Path
-          $p = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart","/l*v","evidence\install.log" -Wait -PassThru
-          Write-Host "msiexec 退出码: $($p.ExitCode)"
-          if ($p.ExitCode -ne 0) { throw "静默安装失败，退出码 $($p.ExitCode)" }
           $appExe = Find-AppExe
           if (-not $appExe) { throw "安装后所有常规盘符都找不到 TaoPad.exe" }
           Write-Host "安装位置: $appExe"
@@ -110,6 +126,37 @@ jobs:
           Get-Process TaoPad -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 2
           Write-Host "真实用户视角：静默安装、启动、稳定运行均通过"
+
+      - name: 上传本班证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-user-view
+          path: evidence/**
+          retention-days: 14
+
+  # 作业 3：恶意攻击者视角（独立 runner）
+  attacker-view:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载安装包
+        uses: actions/download-artifact@v4
+        with:
+          name: TaoPad-installer
+          path: out
+
+      - name: 静默安装（供本班测试）
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path evidence | Out-Null
+          $msi = (Resolve-Path out/*.msi).Path
+          $p = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "静默安装失败，退出码 $($p.ExitCode)" }
 
       - name: 恶意攻击者视角（异常输入/路径穿越/崩溃监测）
         shell: pwsh
@@ -162,6 +209,36 @@ jobs:
           if ($werAfter -gt $werBefore) { throw "出现新的 TaoPad 崩溃报告，攻击者视角不过" }
           Write-Host "恶意攻击者视角：异常输入与路径穿越未引发崩溃，通过"
 
+      - name: 上传本班证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-attacker-view
+          path: evidence/**
+          retention-days: 14
+
+  # 作业 4：全功能界面自动化（独立 runner，独占负载，证据分段上传）
+  ui-automation:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 70
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载安装包
+        uses: actions/download-artifact@v4
+        with:
+          name: TaoPad-installer
+          path: out
+
+      - name: 静默安装（供本班测试）
+        shell: pwsh
+        run: |
+          $msi = (Resolve-Path out/*.msi).Path
+          $p = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "静默安装失败，退出码 $($p.ExitCode)" }
+
       - name: 全功能界面自动化（真机逐项操作+截图+状态栏断言）
         shell: pwsh
         run: |
@@ -169,9 +246,36 @@ jobs:
           $env:PYTHONIOENCODING='utf-8'
           python tools/ui_full_coverage.py
 
+      - name: 上传界面自动化证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-ui-automation
+          path: |
+            ui-evidence/**
+            evidence/**
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # 作业 5：升级与回滚路径（独立 runner）
+  upgrade-rollback:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载安装包
+        uses: actions/download-artifact@v4
+        with:
+          name: TaoPad-installer
+          path: out
+
       - name: 升级与回滚路径（覆盖安装→静默卸载→重装验证）
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force -Path evidence | Out-Null
           Add-Type -AssemblyName System.Windows.Forms
           Add-Type -AssemblyName System.Drawing
           function Snap($path) {
@@ -199,8 +303,39 @@ jobs:
           Snap "evidence\l8-reinstall.png"
           Write-Host "升级与回滚路径：覆盖安装、静默卸载、重装均通过"
 
+      - name: 上传本班证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-upgrade-rollback
+          path: evidence/**
+          retention-days: 14
+
+  # 作业 6：长稳浸泡 30 分钟（独立 runner；定时/手动触发才跑）
+  soak:
+    needs: build
+    if: github.event_name != 'push'
+    runs-on: windows-latest
+    timeout-minutes: 55
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载安装包
+        uses: actions/download-artifact@v4
+        with:
+          name: TaoPad-installer
+          path: out
+
+      - name: 静默安装（供本班浸泡）
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path evidence | Out-Null
+          $msi = (Resolve-Path out/*.msi).Path
+          $p = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "静默安装失败，退出码 $($p.ExitCode)" }
+
       - name: 长稳浸泡 30 分钟（自动班：定时/手动触发）
-        if: github.event_name != 'push'
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.Windows.Forms
@@ -253,13 +388,10 @@ jobs:
           Get-Process TaoPad -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           Write-Host "长稳浸泡 30 分钟通过，三张留证截图非空白"
 
-      - name: 上传测试证据与安装包
+      - name: 上传本班证据
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: multiview-evidence
-          path: |
-            evidence/**
-            ui-evidence/**
-            out/*.msi
+          name: evidence-soak
+          path: evidence/**
           retention-days: 14
