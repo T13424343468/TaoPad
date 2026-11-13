@@ -223,6 +223,15 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 70
     steps:
+      - name: 会话转接控制台+断连策略清零（防 ~60 分钟会话被断杀 agent）
+        shell: pwsh
+        run: |
+          $sid = (Get-Process -Id $PID).SessionId
+          try { tscon.exe $sid /dest:console; Write-Host "tscon OK sid=$sid" } catch { Write-Host "tscon 失败: $_" }
+          reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v MaxDisconnectionTime /t REG_DWORD /d 0 /f
+          reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v MaxIdleTime /t REG_DWORD /d 0 /f
+          reg add "HKCU\Control Panel\Desktop" /v ScreenSaveActive /t REG_SZ /d 0 /f
+
       - name: 检出代码
         uses: actions/checkout@v4
 
