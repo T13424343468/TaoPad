@@ -403,6 +403,17 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             lineNo,
             new TextBlock { Text = "主题" },
             theme,
+            // 数据位置展示（1.0.10）：真机用户可直接核验 D 盘落地情况；
+            // 文字可选中，拖选即可复制路径
+            new TextBlock { Text = "数据位置（配置与日志保存在此目录下）" },
+            new TextBlock
+            {
+                Text = TaoPaths.Root,
+                TextWrapping = TextWrapping.Wrap,
+                IsTextSelectionEnabled = true,
+                FontSize = 12,
+                Opacity = 0.8,
+            },
         } };
         wrap.Header = "自动换行";
         lineNo.Header = "显示行号";
@@ -924,7 +935,7 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
     }
 
     /// <summary>界面展示用版本号；与安装包文件名保持一致。</summary>
-    public const string AppVersion = "1.0.9";
+    public const string AppVersion = "1.0.10";
 
     void UpdateStatus()
     {

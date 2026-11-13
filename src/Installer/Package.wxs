@@ -4,7 +4,7 @@
   <!-- TaoPad 安装包：功能树中可勾选要关联的文件格式 -->
   <Package Codepage="936" Name="TaoPad"
            Manufacturer="TaoPad"
-           Version="1.0.9"
+           Version="1.0.10"
            UpgradeCode="D5A3F0C2-7B18-4E2A-9C4D-1F2E3A4B5C6D"
            Scope="perMachine"
            Compressed="yes">
@@ -60,7 +60,7 @@
         <Control Id="Title" Type="Text" X="20" Y="12" Width="400" Height="22"
                  Text="{\TitleFont}安装 TaoPad" />
         <Control Id="LicenseText" Type="Text" X="20" Y="42" Width="400" Height="92"
-                 Text="TaoPad 1.0.9，版权所有 (c) 2026。本软件供个人与商业用途自由使用。继续安装即表示您接受：本软件按“现状”提供，作者不对使用本软件产生的任何损失承担责任。" />
+                 Text="TaoPad 1.0.10，版权所有 (c) 2026。本软件供个人与商业用途自由使用。继续安装即表示您接受：本软件按“现状”提供，作者不对使用本软件产生的任何损失承担责任。" />
         <Control Id="AcceptCheck" Type="CheckBox" X="20" Y="140" Width="400" Height="16"
                  Property="LICENSE_ACCEPTED" CheckBoxValue="1"
                  Text="我已阅读并同意许可协议" />

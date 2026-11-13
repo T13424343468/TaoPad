@@ -1,5 +1,5 @@
 REM TaoPad 一键构建（需 Windows 10 1809+ 与 .NET 8 SDK）
-REM 产物统一输出 out 文件夹: 仅 1 项 TaoPad-1.0.9-x64.msi（微信风格安装器）
+REM 产物统一输出 out 文件夹: 仅 1 项 TaoPad-1.0.10-x64.msi（微信风格安装器）
 @echo off
 chcp 936 >nul
 cd /d "%~dp0"
@@ -34,7 +34,7 @@ if not "%N%"=="1" (
 )
 echo.
 echo 完成! out 文件夹里只有一项:
-echo   TaoPad-1.0.9-x64.msi     —— 微信风格安装器: 单页界面, 目录可改, 选项可勾
+echo   TaoPad-1.0.10-x64.msi     —— 微信风格安装器: 单页界面, 目录可改, 选项可勾
 pause
 exit /b 0
 :err

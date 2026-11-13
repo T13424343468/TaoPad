@@ -1,6 +1,10 @@
 ﻿# TaoPad — WinUI 3 文本编辑器
 
-**正式版 1.0.9（2026-11-06，定版 1.0 线迭代）**
+**正式版 1.0.10（2026-11-13，定版 1.0 线迭代）**
+
+> 1.0.10 更新：设置弹窗新增「数据位置」展示——数据根实际生效路径
+> （D:\TaoPadData\TaoPad，D 盘不可用时如实显示回退目录）在设置里一目了然，
+> 路径文字可选中复制；版本号六处统一 1.0.10，无其他行为改动。
 
 > 1.0.9 更新（真机修复）：行号栏/小地图底色改走专属键 Ant.GutterBg
 > （三象齐备、纯色、不经陶瓷渐变换装）；代码取色放宽到 GradientBrush 基类并
@@ -68,7 +72,7 @@ src\AntPad\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\AntPad.exe
 
 > 说明：WinUI 3 / Windows App SDK 仅能在 Windows 上编译运行，无法在 Linux/macOS 沙箱内验证，首次构建请在 Windows 环境执行。
 
-### 质量验证状态（1.0.9 定版口径）
+### 质量验证状态（1.0.10 定版口径）
 
 - 全部 C# 源码已通过真实 Roslyn 编译器编译检查（引用 WindowsAppSDK 1.5 与
   Win2D 1.2 的真实程序集，**0 错误 0 警告**）。
@@ -79,7 +83,7 @@ src\AntPad\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\AntPad.exe
 ## 安装包（MSI）
 
 **双击根目录 `build.bat`** 一键完成（第 1 步源码自检：BOM/命名铁律，
-违者中止）。产物固定为 out 文件夹仅 1 项：`TaoPad-1.0.9-x64.msi`
+违者中止）。产物固定为 out 文件夹仅 1 项：`TaoPad-1.0.10-x64.msi`
 （微信风格单页安装器：许可勾选 + 安装目录可改，默认
 `D:\Program Files\TaoPad` + 快捷方式/右键菜单/文件关联可勾选）。
 打包脚本见 `tools/msi/package.ps1`；详细步骤见
