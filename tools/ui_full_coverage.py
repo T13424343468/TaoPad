@@ -450,6 +450,21 @@ def worker_main(argv):
 
 # ---------------- 主进程工具 ----------------
 
+def mem_probe(tag):
+    """逐用例内存探针：记录 python 与 TaoPad 进程工作集到 ui-evidence/memlog.csv。
+    目的：第四轮 ui-automation 于 ~57 分钟同象失联（runner lost communication），
+    下一轮以内存曲线定谳泄漏归属（应用泄漏 / 测试器泄漏 / 其他资源）。"""
+    try:
+        out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"],
+                             capture_output=True, text=True, timeout=60).stdout
+        rows = [l.strip() for l in out.splitlines() if ("TaoPad" in l or "python" in l)]
+        with open(os.path.join(EVID, "memlog.csv"), "a", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%dT%H:%M:%S") + "," + tag.replace(",", ";") + ",rows=" + str(len(rows)) + "\n")
+            for l in rows:
+                f.write(l + "\n")
+    except Exception as e:
+        print("mem_probe失败", tag, e, flush=True)
+
 def shot(name):
     p = os.path.join(EVID, name + ".png")
     try:
@@ -465,6 +480,7 @@ def record(name, ok, detail=""):
 
 
 def case(name, fn):
+    mem_probe(name)
     try:
         fn()
         record(name, True)
