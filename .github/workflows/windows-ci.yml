@@ -218,7 +218,7 @@ jobs:
           retention-days: 14
 
   # 作业 4：全功能界面自动化（独立 runner，独占负载，证据分段上传）
-  ui-automation:
+  ui-automation-a:
     needs: build
     runs-on: windows-latest
     timeout-minutes: 70
@@ -248,18 +248,66 @@ jobs:
           $p = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "静默安装失败，退出码 $($p.ExitCode)" }
 
-      - name: 全功能界面自动化（真机逐项操作+截图+状态栏断言）
+      - name: 界面自动化半场 A（独立会话，单场控制在 57 分钟墙内）
         shell: pwsh
         run: |
           python -m pip install --quiet --disable-pip-version-check pywinauto pillow pyperclip
           $env:PYTHONIOENCODING='utf-8'
-          python tools/ui_full_coverage.py
+          python tools/ui_full_coverage.py A
 
-      - name: 上传界面自动化证据
+      - name: 上传界面自动化证据（A 场）
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: evidence-ui-automation
+          name: evidence-ui-automation-a
+          path: |
+            ui-evidence/**
+            evidence/**
+          if-no-files-found: ignore
+          retention-days: 14
+
+  ui-automation-b:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 70
+    steps:
+      - name: 会话转接控制台+断连策略清零（防 ~60 分钟会话被断杀 agent）
+        shell: pwsh
+        run: |
+          $sid = (Get-Process -Id $PID).SessionId
+          try { tscon.exe $sid /dest:console; Write-Host "tscon OK sid=$sid" } catch { Write-Host "tscon 失败: $_" }
+          reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v MaxDisconnectionTime /t REG_DWORD /d 0 /f
+          reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v MaxIdleTime /t REG_DWORD /d 0 /f
+          reg add "HKCU\Control Panel\Desktop" /v ScreenSaveActive /t REG_SZ /d 0 /f
+
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载安装包
+        uses: actions/download-artifact@v4
+        with:
+          name: TaoPad-installer
+          path: out
+
+      - name: 静默安装（供本班测试）
+        shell: pwsh
+        run: |
+          $msi = (Resolve-Path out/*.msi).Path
+          $p = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "静默安装失败，退出码 $($p.ExitCode)" }
+
+      - name: 界面自动化半场 B（独立会话，单场控制在 57 分钟墙内）
+        shell: pwsh
+        run: |
+          python -m pip install --quiet --disable-pip-version-check pywinauto pillow pyperclip
+          $env:PYTHONIOENCODING='utf-8'
+          python tools/ui_full_coverage.py B
+
+      - name: 上传界面自动化证据（B 场）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-ui-automation-b
           path: |
             ui-evidence/**
             evidence/**
