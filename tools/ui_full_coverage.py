@@ -34,6 +34,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import ctypes
 
@@ -1272,11 +1273,47 @@ def c_exit():
     shot("case-exit")
 
 
+def install_session_keepalive():
+    """对症自救：GitHub hosted Windows runner 的交互会话约 60 分钟被断开，
+    五轮 ui-automation 恒定 ~57 分钟 runner lost communication 与该坑吻合。
+    手段：1) 关屏保与电源空闲超时；2) 后台线程每 20s 微动鼠标保持会话活跃。"""
+    try:
+        import winreg
+        k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Control Panel\Desktop", 0, winreg.KEY_SET_VALUE)
+        winreg.SetValueEx(k, "ScreenSaveActive", 0, winreg.REG_SZ, "0")
+        winreg.CloseKey(k)
+    except Exception as e:
+        print("屏保设置失败", e, flush=True)
+    for cmd in (["powercfg", "/change", "standby-timeout-ac", "0"],
+                ["powercfg", "/change", "monitor-timeout-ac", "0"]):
+        try:
+            subprocess.run(cmd, capture_output=True, timeout=30)
+        except Exception:
+            pass
+    try:
+        import ctypes.wintypes
+        def _kick():
+            pt = ctypes.wintypes.POINT()
+            while True:
+                try:
+                    if ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
+                        ctypes.windll.user32.SetCursorPos(pt.x + 1, pt.y)
+                        ctypes.windll.user32.SetCursorPos(pt.x, pt.y)
+                except Exception:
+                    pass
+                time.sleep(20)
+        th = threading.Thread(target=_kick, daemon=True)
+        th.start()
+        print("session keepalive installed", flush=True)
+    except Exception as e:
+        print("keepalive 启动失败", e, flush=True)
+
 def main():
     global WIN_HANDLE
     if sys.argv[1:2] == ["__worker"]:
         worker_main(sys.argv[2:])
         return
+    install_session_keepalive()
     exe = find_exe()
     print("exe:", exe, flush=True)
     from pywinauto import Application, Desktop
