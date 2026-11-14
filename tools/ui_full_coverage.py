@@ -107,6 +107,48 @@ def bridge_windows(h):
     return ws
 
 
+def rawwalk_texts(h):
+    """v24：RawView 直穿——ControlView 下 WinUI3 主窗正文对 pywinauto 全盲
+    （43580989437/43582362285 两班实锤：子窗桥通道菜单可达、正文文本仍空）。
+    用 UIA RawViewWalker 从目标句柄根节点全树 DFS，收所有非空 Name。
+    这就是 inspect.exe 看到的树，等价于真人所见。"""
+    names = []
+    try:
+        import comtypes
+        import pywinauto.uia_defines  # noqa: F401  确保 UIAutomationClient 类型库就绪
+        from comtypes.gen.UIAutomationClient import CUIAutomation, IUIAutomation
+        import win32gui  # noqa
+        comtypes.CoInitializeEx()
+        iuia = comtypes.client.CreateObject(CUIAutomation(), interface=IUIAutomation)
+        root = iuia.ElementFromHandle(int(h))
+        walker = iuia.RawViewWalker
+        stack = [root]
+        seen = 0
+        while stack and seen < 4000:
+            cur = stack.pop()
+            seen += 1
+            try:
+                n = cur.CurrentName
+                if n and n.strip():
+                    names.append(n.strip())
+            except Exception:
+                pass
+            try:
+                child = walker.GetFirstChildElement(cur)
+                sibs = []
+                while child is not None and len(sibs) < 200:
+                    sibs.append(child)
+                    child = walker.GetNextSiblingElement(child)
+                stack.extend(reversed(sibs))
+            except Exception:
+                pass
+        print("RAWWALK", f"nodes={seen}, named={len(names)}", flush=True)
+    except Exception as e:
+        print("RAWWALK ERR", type(e).__name__, flush=True)
+        return []
+    return names
+
+
 def worker_run(argv):
     """独立进程做 UIA 操作，返回 stdout 字符串。v14：兜底超时与异常，
     任何失败都回传明确标记，不让传话通道静默变空。"""
@@ -290,6 +332,7 @@ def worker_main(argv):
         # 多通道：句柄连接失败或读空时，按标题重找窗口再试；
         # v23：补 DesktopChildSiteBridge 子窗通道（正文 UIA 挂在桥上，43580989437 实锤）
         sources = [w for w in (win,) if w is not None] + bridge_windows(h) + [None]
+        raw_names = rawwalk_texts(h)   # v24：RawView 直穿兜底
         if mode == "read_texts":
             names = []
             for w in sources:
@@ -310,6 +353,8 @@ def worker_main(argv):
                             break
                     except Exception:
                         names = []
+            if not names and raw_names:
+                names = raw_names
             if not names:
                 # v20 空读诊断：顶层窗口普查 + 主窗原始后代计数——定位死树范围
                 try:
