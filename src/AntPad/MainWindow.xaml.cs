@@ -4,6 +4,7 @@ using AntPad.Services;
 using AntPad.Syntax;
 using AntPad.Views;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.Windows.AppLifecycle;
@@ -958,21 +959,23 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
         catch { /* 供给修复失败不阻断启动，保持原行为 */ }
     }
 
-    void ExposeFlyoutItems(MenuFlyout flyout)
+    void ExposeFlyoutItems(IList<MenuFlyoutItemBase> items)
     {
-        foreach (var item in flyout.Items)
+        foreach (var item in items)
         {
             switch (item)
             {
-                case MenuFlyoutItem mfi:
-                    AutomationProperties.SetName(mfi, mfi.Text);
+                // MenuFlyoutSubItem/ToggleMenuFlyoutItem 均继承自 MenuFlyoutItem，
+                // 必须先判子类，否则后面的 case 不可达（CS8120）
+                case MenuFlyoutSubItem sub:
+                    AutomationProperties.SetName(sub, sub.Text);
+                    ExposeFlyoutItems(sub.Items);
                     break;
                 case ToggleMenuFlyoutItem tmi:
                     AutomationProperties.SetName(tmi, tmi.Text);
                     break;
-                case MenuFlyoutSubItem sub:
-                    AutomationProperties.SetName(sub, sub.Text);
-                    ExposeFlyoutItems(sub.Items);
+                case MenuFlyoutItem mfi:
+                    AutomationProperties.SetName(mfi, mfi.Text);
                     break;
             }
         }
