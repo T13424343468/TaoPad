@@ -130,9 +130,10 @@ def rawwalk_texts(h):
             def _enum(hc, _lp):
                 kids.append(hc)
                 return 1
+            cb_inst = _cb(_enum)
             _EnumChildWindows = ctypes.windll.user32.EnumChildWindows
             _EnumChildWindows.argtypes = (_wt.HWND, _cb, _wt.LPARAM)
-            _EnumChildWindows(_wt.HWND(h), _cb, 0)
+            _EnumChildWindows(_wt.HWND(h), cb_inst, 0)
             handles.extend(kids[:20])
             print("RAWWALK2", f"children={len(kids)}", flush=True)
         except Exception as _e:
