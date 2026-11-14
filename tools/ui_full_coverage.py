@@ -138,8 +138,29 @@ def rawwalk_texts(h):
             print("RAWWALK2", f"children={len(kids)}", flush=True)
         except Exception as _e:
             print("RAWWALK2 child-enum ERR", type(_e).__name__, _e, flush=True)
-        # v27：子窗桥直连仍摸不到正文（RAWWALK nodes=4 实锤）——改从桌面根全树 DFS，
-        # 按 ProcessId 过滤出本进程的全部元素（inspect.exe 等价视角，不依赖 hwnd 归属）
+        # v29：手爬两连盲（nodes=4 / 桌面根 nodes=1 实锤）——改 UIA 原生检索：
+        # 桌面根 FindAll(Descendants, ProcessId==pid)，引擎侧枚举，等价 inspect.exe 全树
+        try:
+            from comtypes.gen.UIAutomationClient import UIA_ProcessIdPropertyId, TreeScope_Descendants
+            _pidbuf = ctypes.c_uint()
+            ctypes.windll.user32.GetWindowThreadProcessId(int(h), ctypes.byref(_pidbuf))
+            _pid = _pidbuf.value
+            cond = iuia.CreatePropertyElementCondition(UIA_ProcessIdPropertyId, _pid)
+            found = iuia.GetRootElement().FindAll(TreeScope_Descendants, cond)
+            pid_names = []
+            for k in range(found.Length):
+                try:
+                    n = found.GetElement(k).CurrentName
+                    if n and n.strip():
+                        pid_names.append(n.strip())
+                except Exception:
+                    pass
+            print("RAWWALK4", f"pid={_pid}, found={found.Length}, named={len(pid_names)}", flush=True)
+            if len(pid_names) > len(names):
+                names = pid_names
+        except Exception as _e:
+            print("RAWWALK4 ERR", type(_e).__name__, _e, flush=True)
+
         try:
             _pidbuf = ctypes.c_uint()
             ctypes.windll.user32.GetWindowThreadProcessId(int(h), ctypes.byref(_pidbuf))
