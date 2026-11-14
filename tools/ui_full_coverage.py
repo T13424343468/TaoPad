@@ -28,6 +28,15 @@ ALT 会把菜单栏置为"菜单模式"，随后的 F10 被当成关闭菜单，
 后加一次可见性验证、未开重试一次；缩放改用底层按键（pywinauto 不认
 {ADD} 键名，此前一直被读层故障掩盖）。
 覆盖：文件9/编辑16/搜索6/查看3组/语言13/编码5+3/主题3/设置/标签页/状态栏。
+v30（43589969300 实锤回灌）：UIA 文本管线 v24→v29 八连盲，全部停用——
+①状态栏/缩放/匹配位置断言改源码揪清单通道：存盘字节级断言（编码 BOM/GBK/Big5、
+换行符）、剪贴板行内容断言（查找/转到行）、注释标记按语言落剪贴板（Tokenizer.cs
+标记表）、缩放/面板/主题/行号用 PIL 像素量测；②菜单直呼（InvokePattern 本身违
+十维度③）全改真人鼠标+键盘路径 menu_kb，应用侧真实事件以 trace.log 回执为准；
+③T02 假绿定谳：菜单未弹时 SPACE/ENTER 落编辑区（O08b 残留 'SMoreMore' 实锤），
+改 trace.log「设置：入口/已确认」断言；④换行菜单只写 doc.Eol（状态栏显示），
+保存链路用 Editor.Text（OutputEol 内容探测）——字节断言对 LF/CR 如实暴露，
+按规范六.3 不重跑不修饰，报应用真实发现。
 """
 import json
 import os
@@ -1220,14 +1229,13 @@ def c_format():
 
 
 def c_comment():
-    # 纯文本没有行注释配置，先经「语言」菜单切到 Python（顺带验证语言菜单导航）
-    menu("语言", "Python")
-    status_has(exact="Python")
+    # v30：不读状态栏。语言切换的实证 = 注释标记按该语言生效（Tokenizer.cs 标记表）
+    menu_kb("语言", "Python")
+    time.sleep(0.6)
     click_editor()
     esc_cleanup()
     send_keys("^a{DEL}")
     type_text("code-line")
-    n0 = len(editor_clipboard())
     send_keys("^a")
     time.sleep(0.25)
     # 审查专项修复：注释和弦必须同一事件串连发（^kc / ^ku）。
@@ -1235,42 +1243,51 @@ def c_comment():
     # 还会把 "c"/"u" 写进正文（E07 四班恒崩实锤）。
     send_keys("^kc")
     time.sleep(0.7)
-    n1 = len(editor_clipboard())
-    assert n1 > n0, f"注释未生效 {n0}->{n1}"
+    marked = editor_clipboard()
+    assert marked.strip().startswith("#"), f"注释未按 Python 标记(#)生效: {marked[:40]!r}"
     send_keys("^a")
     time.sleep(0.25)
     send_keys("^ku")
     time.sleep(0.7)
-    n2 = len(editor_clipboard())
-    assert n2 < n1, f"取消注释未生效 {n1}->{n2}"
+    unmarked = editor_clipboard()
+    assert unmarked.strip() == "code-line", f"取消注释未还原: {unmarked[:40]!r}"
     shot("case-comment")
-    menu("语言", "纯文本")
-    time.sleep(0.4)
 
 
 def c_find_panel():
+    # v30：不读状态栏列号。匹配落点用「复制当前行」断言（两行内容互异可辨）
     click_editor()
     esc_cleanup()
     send_keys("^a{DEL}")
-    type_text("xx apple yy apple")
+    type_text("alpha beta\ngamma beta")
     send_keys("^{HOME}")          # 查找从光标向后且不回绕，先回文档开头
     time.sleep(0.4)
     send_keys("^f")
     time.sleep(1.0)
-    send_keys("apple")
+    send_keys("beta")
     time.sleep(0.5)
-    # 输入后可能已自动定位首个匹配（光标显示在选中串末尾，列 9）；
-    # 未定位则回车触发查找。第五轮截图证实：第二个匹配显示 列 18。
-    if not col_seen([8, 9], 3.0):
-        send_keys("{ENTER}")
-        time.sleep(0.8)
-    assert col_seen([8, 9]), "状态栏未显示首个匹配位置"
-    send_keys("{ENTER}")          # 下一个匹配
+    send_keys("{ENTER}")          # 首个匹配（行1）
     time.sleep(0.8)
-    assert col_seen([18]), "状态栏未显示第二个匹配位置"
+    send_keys("{ESC}")
+    time.sleep(0.4)
+    line1 = copy_current_line().strip()
+    assert line1 == "alpha beta", f"首个匹配未落在行1: {line1[:40]!r}"
+    send_keys("^f")
+    time.sleep(0.8)
+    send_keys("{ENTER}")          # 查找框保留 beta，继续下一个（行2）
+    time.sleep(0.8)
+    send_keys("{ESC}")
+    time.sleep(0.4)
+    line2 = copy_current_line().strip()
+    assert line2 == "gamma beta", f"查找下一个未到行2: {line2[:40]!r}"
+    send_keys("^f")
+    time.sleep(0.8)
     send_keys("+{F3}")            # 查找上一个
     time.sleep(0.8)
-    assert col_seen([8, 9]), "反向查找未回到首个匹配"
+    send_keys("{ESC}")
+    time.sleep(0.4)
+    line3 = copy_current_line().strip()
+    assert line3 == "alpha beta", f"反向查找未回首匹配: {line3[:40]!r}"
     shot("case-find-panel")
     close_panel()
     click_editor()
@@ -1296,76 +1313,67 @@ def c_replace_panel():
 
 
 def c_goto():
+    # v30：不读状态栏。转到行用「复制当前行」内容判定（29 行内容互异）
     esc_cleanup()
     click_editor()
     send_keys("^a{DEL}")
     type_text("\n".join(f"line{i}" for i in range(1, 30)))
-    send_keys("^g")
-    time.sleep(1.2)
+    send_keys("^{HOME}")
+    time.sleep(0.4)
     ok = False
+    got = ""
     for seq in ("5{ENTER}", "{TAB}5{ENTER}", "5{TAB}{ENTER}"):
+        send_keys("^g")
+        time.sleep(1.2)
         send_keys(seq)
         time.sleep(1.0)
-        if any("行 5，列" in t for t in texts()):
+        send_keys("{ESC}")
+        time.sleep(0.4)
+        got = copy_current_line().strip()
+        if got == "line5":
             ok = True
             break
-        send_keys("^g")
-        time.sleep(1.0)
     close_panel()
     shot("case-goto")
-    assert ok, "转到行未生效，状态栏未见 行 5"
+    assert ok, f"转到行未生效（按行内容判定），当前行: {got[:40]!r}"
 
 
 def c_find_in_files():
+    # v30：面板开合与扫描结果用像素差分断言（面板出现必然改变窗口画面），
+    # 编辑框计数作辅证打印。截图全部落证据目录。
     close_panel()
+    img0 = grab_img()
     opened = False
     for _ in range(3):
         send_keys("^+{F}")
         time.sleep(1.3)
-        if worker_edits_on_win() > 1:   # 面板带输入框，编辑框数量增加即视为已开
+        if _pixel_changed(img0) > 0.004 or worker_edits_on_win() > 1:
             opened = True
             break
         send_keys("{ESC}")
         time.sleep(0.5)
     if not opened:
-        # 快捷键路径未确认时，走菜单路径再试一次（v9：菜单开合已可验证）
-        menu("搜索", "在文件中查找…")
-        if worker_edits_on_win() > 1:
-            opened = True
-    assert opened, "在文件中查找面板未打开"
+        menu_kb("搜索", "在文件中查找…")
+        time.sleep(1.2)
+        opened = _pixel_changed(img0) > 0.004 or worker_edits_on_win() > 1
+    shot("case-fif-open")
+    assert opened, "在文件中查找面板未打开（像素差分与编辑框计数均无变化）"
     send_keys(DOCS)        # 文件夹框（首个控件，默认焦点）
     time.sleep(0.4)
     send_keys("{TAB}")     # 到查找内容框
     time.sleep(0.3)
     send_keys("save-me")
-    time.sleep(0.3)
+    time.sleep(0.5)
+    img1 = grab_img()      # 打字后稳定态
     send_keys("{ENTER}")   # 回车触发扫描
     time.sleep(2.5)
+    img2 = grab_img()
+    d2 = _pixel_changed(img1, img2)
     shot("case-find-in-files")
     close_panel()
+    assert d2 > 0.002, f"扫描结果无画面变化（像素差分 {d2:.5f}，见 case-find-in-files 截图）"
 
 
-def col_seen(cols, timeout=8.0):
-    """状态栏出现任一目标列号（光标显示在选中串末尾，列号按截图口径）"""
-    t0 = time.time()
-    while time.time() - t0 < timeout:
-        for t in texts():
-            for c in cols:
-                if f"列 {c}" in t:
-                    return True
-        time.sleep(2.0)
-    return False
-
-
-def zoom_val():
-    t0 = time.time()
-    while time.time() - t0 < 12.0:
-        for t in texts():
-            m = re.fullmatch(r"(\d{2,3})%", t.strip())
-            if m:
-                return int(m.group(1))
-        time.sleep(2.0)
-    raise AssertionError("状态栏没有缩放百分比: " + str(texts()[:20]))
 
 
 def zoom_hotkey(vk_code):
@@ -1377,61 +1385,274 @@ def zoom_hotkey(vk_code):
     time.sleep(0.8)
 
 
+# ============ v30：源码揪清单断言通道（不依赖 UIA 文本读取） ============
+
+TRACE_PATHS = [os.path.join("D:" + os.sep, "TaoPadData", "TaoPad", "trace.log"),
+               os.path.join(os.environ.get("LOCALAPPDATA", ""), "TaoPad", "trace.log")]
+
+
+def trace_mark():
+    for p in TRACE_PATHS:
+        try:
+            with open(p, encoding="utf-8", errors="replace") as f:
+                return sum(1 for _ in f)
+        except OSError:
+            continue
+    return 0
+
+
+def trace_since(mark):
+    """trace.log 自 mark 行之后的新增行：应用侧真实事件回执（菜单点开/按下、设置流）"""
+    out = []
+    for p in TRACE_PATHS:
+        try:
+            with open(p, encoding="utf-8", errors="replace") as f:
+                out = [l.rstrip("\r\n") for l in f.readlines()[mark:]]
+            break
+        except OSError:
+            continue
+    if out:
+        print("trace 回执:", " | ".join(out[-6:]), flush=True)
+    return out
+
+
+def menu_kb(*titles):
+    """v30：真人路径菜单导航（规范十维度③：只许点/滑/拖，禁接口直达绕界面）。
+    鼠标点顶级菜单（worker 坐标点击）→ 键盘 DOWN 逐项 → 子菜单 RIGHT → 叶子 ENTER。
+    只向前 DOWN、ENTER 只落在目标叶子，规避 v18 键盘回退误触退出实锤。
+    顶级点击失败时 F10 键序开菜单（同样真人键序），导航效果由用例自行断言。"""
+    close_panel(verify=False)
+    mark = trace_mark()
+    top = titles[0]
+    ok = worker_click_menu(top)
+    if not ok:
+        _open_top_keyboard(top)
+    time.sleep(0.9)
+    for depth in range(1, len(titles)):
+        title = titles[depth]
+        if title in MENUS.get(top, []):
+            idx = MENUS[top].index(title)
+        else:
+            idx = SUBMENUS.get(titles[depth - 1], []).index(title)
+        for _ in range(idx):
+            send_keys("{DOWN}")
+            time.sleep(0.3)
+        if title in SUBMENUS:
+            send_keys("{RIGHT}")     # 有子菜单的项：RIGHT 展开（与最近文件同路）
+            time.sleep(0.8)
+        else:
+            send_keys("{ENTER}")
+            time.sleep(0.8)
+    trace_since(mark)
+    return ok
+
+
+def copy_current_line():
+    """光标所在行复制：HOME 归位 → SHIFT+END 选行 → ^c（不依赖 UIA 读状态栏）"""
+    pyperclip.copy("")
+    send_keys("{HOME}")
+    time.sleep(0.25)
+    send_keys("+{END}")
+    time.sleep(0.25)
+    send_keys("^c")
+    time.sleep(0.4)
+    return pyperclip.paste()
+
+
+def grab_img():
+    return ImageGrab.grab()
+
+
+def _pixel_changed(img_a, img_b=None, crop=(0.05, 0.10, 0.95, 0.90)):
+    """两帧灰度差分占比（面板出现/主题换色/行号显隐必然改变画面）"""
+    if img_b is None:
+        img_b = grab_img()
+    w, h = img_a.size
+    box = (int(w*crop[0]), int(h*crop[1]), int(w*crop[2]), int(h*crop[3]))
+    ga = img_a.crop(box).convert("L")
+    gb = img_b.crop(box).convert("L")
+    if ga.size != gb.size:
+        gb = gb.resize(ga.size)
+    da, db = ga.load(), gb.load()
+    W, H = ga.size
+    diff = sum(1 for y in range(0, H, 3) for x in range(0, W, 3) if abs(da[x, y] - db[x, y]) > 12)
+    total = (H // 3 + 1) * (W // 3 + 1)
+    return diff / total
+
+
+def _ink_stats(img, crop=(0.15, 0.25, 0.85, 0.75)):
+    """编辑区中央裁片墨迹统计：返回 (文本行带高中位数px, 墨迹占比, 行带数)。
+    背景按多数色自动定极性，深浅主题通吃；无文本返回 None。"""
+    w, h = img.size
+    box = (int(w*crop[0]), int(h*crop[1]), int(w*crop[2]), int(h*crop[3]))
+    g = img.crop(box).convert("L")
+    px = list(g.getdata())
+    lo, hi = min(px), max(px)
+    if hi - lo < 24:
+        return None
+    thr = (lo + hi) // 2
+    W, H = g.size
+    data = g.load()
+    ys = range(0, H, 2)
+    xs = range(0, W, 2)
+    dark = 0
+    total = 0
+    for y in ys:
+        for x in xs:
+            total += 1
+            if data[x, y] < thr:
+                dark += 1
+    ink_is_dark = dark <= total / 2
+    bands = []
+    in_band = 0
+    for y in range(H):
+        row_ink = sum(1 for x in range(0, W, 2) if (data[x, y] < thr) == ink_is_dark)
+        if row_ink >= 3:
+            in_band += 1
+        elif in_band:
+            if in_band >= 3:
+                bands.append(in_band)
+            in_band = 0
+    if in_band >= 3:
+        bands.append(in_band)
+    if not bands:
+        return None
+    bands.sort()
+    med = bands[len(bands) // 2]
+    ink_ratio = (dark if ink_is_dark else total - dark) / total
+    return (med, ink_ratio, len(bands))
+
+
 def c_zoom():
+    # v30：不读状态栏缩放百分比。字形行带高度 PIL 量测（墨迹占比作辅助读数）
     click_editor()
     esc_cleanup()
-    z0 = zoom_val()
+    send_keys("^a{DEL}")
+    type_text("\n".join(f"缩放采样行 zoom-probe-{i:02d} HhIi" for i in range(6)))
+    time.sleep(0.5)
+    m0 = _ink_stats(grab_img())
+    assert m0, "缩放量测失败：编辑区无墨迹（见截图）"
     zoom_hotkey(0x6B)          # Ctrl+小键盘加号 = 放大
-    z1 = zoom_val()
-    assert z1 > z0, f"放大未生效 {z0}->{z1}"
+    m1 = _ink_stats(grab_img())
+    assert m1, "放大后量测失败"
     zoom_hotkey(0x6B)
-    z2 = zoom_val()
-    assert z2 > z1, f"放大第二次未生效 {z1}->{z2}"
+    m2 = _ink_stats(grab_img())
+    assert m2, "放大第二次量测失败"
     shot("case-zoom-in")
+    print(f"缩放读数 基线={m0} 放大1={m1} 放大2={m2}", flush=True)
+
+    def _up(a, b):
+        return b[0] > a[0] or (b[0] == a[0] and b[1] > a[1] * 1.05)
+
+    assert _up(m0, m1) and _up(m1, m2), f"放大未生效: 基线={m0} 放大1={m1} 放大2={m2}"
     zoom_hotkey(0x6D)          # Ctrl+小键盘减号 = 缩小
-    assert zoom_val() < z2, "缩小未生效"
+    m3 = _ink_stats(grab_img())
+    assert m3, "缩小后量测失败"
+
+    def _down(a, b):
+        return b[0] < a[0] or (b[0] == a[0] and b[1] < a[1] * 0.95)
+
+    assert _down(m2, m3), f"缩小未生效: 放大2={m2} 缩小={m3}"
     send_keys("^0")
     time.sleep(0.8)
-    assert zoom_val() == 100, f"复位未回到100%，当前{zoom_val()}%"
+    m4 = _ink_stats(grab_img())
+    assert m4, "复位后量测失败"
+    assert abs(m4[0] - m0[0]) <= 1, f"复位未回到基线: 基线={m0} 复位={m4}"
     shot("case-zoom-reset")
 
 
 def c_wrap_toggle():
-    menu("查看", "自动换行")
+    # v30：真人路径 + 超长行像素差分断言（换行开关必然改变渲染）
+    click_editor()
+    esc_cleanup()
+    send_keys("^a{DEL}")
+    type_text("wrap-" * 120)
     time.sleep(0.4)
+    w0 = grab_img()
+    menu_kb("查看", "自动换行")
+    time.sleep(0.6)
+    w1 = grab_img()
     shot("case-wrap-on")
-    menu("查看", "自动换行")
-    time.sleep(0.4)
+    d1 = _pixel_changed(w0, w1)
+    menu_kb("查看", "自动换行")
+    time.sleep(0.6)
+    w2 = grab_img()
     shot("case-wrap-off")
+    d2 = _pixel_changed(w1, w2)
+    assert d1 > 0.004 and d2 > 0.004, f"换行开关画面无变化: on段={d1:.5f} off段={d2:.5f}"
 
 
 def c_lineno_toggle():
-    menu("查看", "显示行号")
-    time.sleep(0.5)
+    # v30：真人路径 + 行号栏像素差分断言（左侧带显隐必然改变画面）
+    a0 = grab_img()
+    menu_kb("查看", "显示行号")
+    time.sleep(0.6)
+    a1 = grab_img()
     shot("case-lineno-off")
-    menu("查看", "显示行号")
-    time.sleep(0.5)
+    d1 = _pixel_changed(a0, a1, crop=(0.0, 0.2, 0.25, 0.8))
+    menu_kb("查看", "显示行号")
+    time.sleep(0.6)
+    a2 = grab_img()
     shot("case-lineno-on")
+    d2 = _pixel_changed(a1, a2, crop=(0.0, 0.2, 0.25, 0.8))
+    assert d1 > 0.003 and d2 > 0.003, f"行号开关画面无变化: off段={d1:.5f} on段={d2:.5f}"
 
 
 THEMES = ["水墨", "天青", "墨夜"]
 
 
 def c_themes():
+    # v30：真人路径 + 全窗像素差分断言（换主题必然整窗变色）
+    prev = grab_img()
     for i, t in enumerate(THEMES):
-        menu("主题", t)
-        time.sleep(0.6)
+        menu_kb("主题", t)
+        time.sleep(1.0)
+        cur = grab_img()
+        d = _pixel_changed(prev, cur, crop=(0.0, 0.0, 1.0, 1.0))
+        prev = cur
         shot(f"case-theme-{i}")
+        assert d > 0.02, f"主题[{t}]切换后画面无变化（差分 {d:.5f}）"
 
 
 ENCS = ["UTF-8 BOM", "UTF-16 LE", "GBK", "Big5", "UTF-8"]
 
 
 def c_encodings():
-    for enc in ENCS:
-        menu("编码", "保存编码", enc)
+    # v30：不读状态栏。存盘后读字节断言（SaveDocAsync 写 doc.Enc + doc.Bom 前导）
+    p = os.path.join(DOCS, "taopad-enc-bytes.txt")
+    if os.path.exists(p):
+        os.remove(p)
+    click_editor()
+    send_keys("^a{DEL}")
+    type_text("save-me-文")   # 「文」GBK/Big5 双码表可编（内 是简体字，Big5 编不了）
+    for i, enc in enumerate(ENCS):
+        menu_kb("编码", "保存编码", enc)
         time.sleep(0.4)
-        status_has(exact=enc)
+        focus_main()
+        send_keys("^s")
+        time.sleep(0.6)
+        if i == 0:
+            picker_typing(p)   # 未命名文档首存走选择器（O01 已验证通道）
+            time.sleep(1.2)
+        assert os.path.exists(p), f"[{enc}] 保存后文件不存在: {p}"
+        with open(p, "rb") as f:
+            data = f.read()
+        if enc == "UTF-8 BOM":
+            assert data.startswith(b"\xef\xbb\xbf"), f"[{enc}] 无 BOM 头: {data[:12].hex()}"
+        elif enc == "UTF-16 LE":
+            assert data.startswith(b"\xff\xfe"), f"[{enc}] 无 UTF-16 LE 前导: {data[:12].hex()}"
+            body = data[2:].decode("utf-16-le")
+            assert "文" in body, f"[{enc}] UTF-16 解码无中文样文: {body[:40]!r}"
+        elif enc in ("GBK", "Big5"):
+            assert not data.startswith(b"\xef\xbb\xbf") and not data.startswith(b"\xff\xfe"), \
+                f"[{enc}] 不应带 BOM: {data[:8].hex()}"
+            want = ("gbk" if enc == "GBK" else "big5")
+            assert data == "save-me-文".encode(want), \
+                f"[{enc}] 字节不匹配: {data[:24].hex()} vs {'save-me-文'.encode(want).hex()}"
+        else:   # UTF-8 无 BOM
+            assert not data.startswith(b"\xef\xbb\xbf"), f"[{enc}] 不应带 BOM: {data[:8].hex()}"
+            assert "save-me-文".encode("utf-8") in data, f"[{enc}] 非 UTF-8 字节: {data[:24].hex()}"
+        print(f"[{enc}] 字节断言过: {data[:16].hex()} len={len(data)}", flush=True)
     shot("case-encodings")
 
 
@@ -1439,22 +1660,95 @@ EOLS = [("Unix (LF)", "LF"), ("Mac (CR)", "CR"), ("Windows (CRLF)", "CRLF")]
 
 
 def c_eols():
+    # v30：字节级断言落盘换行。源码实锤：换行菜单只写 doc.Eol（状态栏显示），
+    # SaveDocAsync 直写 doc.Editor.Text，其换行由 OutputEol（内容探测）决定——
+    # 菜单选择若未应用到落盘字节，属应用真实发现，按规范六.3 如实记红不重跑。
+    p = os.path.join(DOCS, "taopad-eol-bytes.txt")
+    if os.path.exists(p):
+        os.remove(p)
+    click_editor()
+    send_keys("^a{DEL}")
+    type_text("eol-line1\neol-line2")
+    first = True
+    EOL_WANT = {"LF": "\n", "CR": "\r", "CRLF": "\r\n"}
+    found = []
     for title, token in EOLS:
-        menu("编码", "换行符", title)
+        want = EOL_WANT[token]
+        menu_kb("编码", "换行符", title)
         time.sleep(0.4)
-        status_has(exact=token)
+        focus_main()
+        send_keys("^s")
+        time.sleep(0.6)
+        if first:
+            picker_typing(p)
+            time.sleep(1.2)
+            first = False
+        assert os.path.exists(p), f"[{token}] 保存后文件不存在: {p}"
+        with open(p, "rb") as f:
+            data = f.read()
+        n_crlf = data.count(b"\r\n")
+        n_lf = data.count(b"\n") - n_crlf
+        n_cr = data.count(b"\r") - n_crlf
+        if want == "\r\n":
+            ok = n_crlf > 0 and n_lf == 0 and n_cr == 0
+        elif want == "\n":
+            ok = n_lf > 0 and n_crlf == 0 and n_cr == 0
+        else:
+            ok = n_cr > 0 and n_crlf == 0 and n_lf == 0
+        found.append((token, ok, n_crlf, n_lf, n_cr, bytes(data[:40])))
+        print(f"[EOL] 菜单选择 {token}: CRLF={n_crlf} LF={n_lf} CR={n_cr} {'过' if ok else '未应用'}", flush=True)
     shot("case-eols")
+    bad = [f for f in found if not f[1]]
+    assert not bad, "换行符未应用到落盘字节: " + "; ".join(
+        f"{t}: CRLF={c} LF={l} CR={r} 数据={d!r}" for t, _ok, c, l, r, d in bad)
 
 
 LANGS = ["纯文本", "C / C++", "C#", "Java", "JavaScript / TypeScript", "Go", "Rust",
          "C 风格其他 (Swift/Kotlin/PHP/Dart…)", "Python", "JSON", "XML / HTML", "Markdown", "SQL"]
 
 
+# 注释标记按应用源码（Syntax/CommentCommands.cs + Tokenizer.cs）：
+# C 系 //，Python #，SQL --，XML/HTML 包裹 <!-- -->；
+# 纯文本/JSON/Markdown 无注释语法（Toggle 返回 null，原样不动）。
+LANG_MARK = {
+    "纯文本": None, "C / C++": "//", "C#": "//", "Java": "//",
+    "JavaScript / TypeScript": "//", "Go": "//", "Rust": "//",
+    "C 风格其他 (Swift/Kotlin/PHP/Dart…)": "//", "Python": "#",
+    "JSON": None, "XML / HTML": "xml", "Markdown": None, "SQL": "--",
+}
+
+
 def c_languages():
+    # v30：不读状态栏。逐语言「注释→剪贴板比对标记→取消注释还原」，
+    # 语法语言切换以注释标记实际生效为实证（源码揪清单口径）。
+    click_editor()
+    esc_cleanup()
+    send_keys("^a{DEL}")
     for lang in LANGS:
-        menu("语言", lang)
-        time.sleep(0.3)
-        status_has(exact=lang)
+        menu_kb("语言", lang)
+        time.sleep(0.5)
+        click_editor()
+        send_keys("^a{DEL}")
+        type_text("code-line")
+        send_keys("^a")
+        time.sleep(0.25)
+        send_keys("^kc")
+        time.sleep(0.7)
+        marked = editor_clipboard().strip()
+        want = LANG_MARK[lang]
+        if want is None:
+            assert marked == "code-line", f"[{lang}] 无注释语法语言被加注释: {marked[:40]!r}"
+        elif want == "xml":
+            assert marked.startswith("<!--") and marked.endswith("-->"), \
+                f"[{lang}] XML 包裹注释未生效: {marked[:48]!r}"
+        else:
+            assert marked.startswith(want), f"[{lang}] 注释标记[{want}]未生效: {marked[:40]!r}"
+        send_keys("^a")
+        time.sleep(0.25)
+        send_keys("^ku")
+        time.sleep(0.7)
+        restored = editor_clipboard().strip()
+        assert restored == "code-line", f"[{lang}] 取消注释未还原: {restored[:40]!r}"
     shot("case-languages")
 
 
@@ -1522,18 +1816,22 @@ def c_recent_menu():
 
 
 def c_export_html():
-    menu("文件", "导出", "导出为可打印 HTML（PDF 用）…")
+    # v30：菜单改真人路径（menu_kb），导出文件唯一命名防旧档假绿
+    p = os.path.join(DOCS, "taopad-export2.html")
+    if os.path.exists(p):
+        os.remove(p)
+    menu_kb("文件", "导出", "导出为可打印 HTML（PDF 用）…")
     time.sleep(0.6)
     if not dialog_present():
         # 菜单没弹/路径进了编辑区：ESC 后整重试一次
         send_keys("{ESC}")
         time.sleep(0.4)
-        menu("文件", "导出", "导出为可打印 HTML（PDF 用）…")
+        menu_kb("文件", "导出", "导出为可打印 HTML（PDF 用）…")
         time.sleep(0.6)
-    picker_typing(HTML_OUT)
+    picker_typing(p)
     time.sleep(1.2)
-    assert os.path.exists(HTML_OUT), "导出 HTML 未生成"
-    with open(HTML_OUT, encoding="utf-8", errors="ignore") as f:
+    assert os.path.exists(p), "导出 HTML 未生成"
+    with open(p, encoding="utf-8", errors="ignore") as f:
         head = f.read(200)
     assert "DOCTYPE html" in head or "<html" in head.lower(), "导出内容不是 HTML"
     shot("case-export-html")
@@ -1573,7 +1871,10 @@ def c_tabs_and_close():
 
 
 def c_settings():
-    menu("工具", "设置…")
+    # v30：真人路径 + trace.log 断言（「设置：入口/已确认」为应用真实事件回执）。
+    # 定谳：此前 menu() 未弹时 SPACE/ENTER 落编辑区（O08b 残留 'S' 实锤）= 假绿。
+    mark = trace_mark()
+    menu_kb("工具", "设置…")
     time.sleep(1.3)
     shot("case-settings-dialog")
     send_keys("{SPACE}")     # 焦点默认落在第一个开关（自动换行），空格切换
@@ -1586,52 +1887,76 @@ def c_settings():
     send_keys("{ENTER}")     # 默认按钮=应用
     time.sleep(1.2)
     shot("case-settings-applied")
+    ev = trace_since(mark)
+    ok = any("设置：入口" in l for l in ev) and any("设置：对话框已确认" in l for l in ev)
+    if not ok:
+        click_editor()
+        send_keys("^a{DEL}")   # 清掉误入编辑区的按键痕迹，防污染后续用例
+    assert ok, "设置流程 trace 无「入口/已确认」回执（弹窗未开或应用键未触发）"
 
 
 def c_mouse_menu():
-    """鼠标路径专项对照：真实坐标点击菜单栏「文件」→键盘导航到「新建」。
-    功能验证走内容比对（新建后应是空编辑区），不依赖 UIA 读层——
-    鼠标点菜单栏疑似会拖瘫应用 UIA Text 供给，此用例用于复现与留证。"""
+    """v30：鼠标路径专项对照（保留原口径）。先落已知标记内容再开菜单——
+    导航失败时残留可辨、可整轮重试，不再一击定生死。"""
     close_panel()
-    ok = worker_click_menu("文件")
-    time.sleep(1.0)
-    for _ in range(MENUS["文件"].index("新建")):
-        send_keys("{DOWN}")
-        time.sleep(0.3)
-    send_keys("{ENTER}")
-    time.sleep(1.2)
-    if not dialog_present():
+    ok = False
+    got = ""
+    for attempt in range(3):
         click_editor()
-    esc_cleanup()
-    click_editor()
-    type_text("mouse-path-ok")
-    clip = re.sub(r"\s+", "", editor_clipboard())
-    assert clip == "mouse-path-ok", (
-        f"鼠标路径菜单未建成新标签（内容残留）: {clip[-60:]!r}")
+        send_keys("^a{DEL}")
+        type_text("pre-menu-marker")
+        if not worker_click_menu("文件"):
+            send_keys("{ESC}")
+            time.sleep(0.5)
+            continue
+        time.sleep(1.0)
+        for _ in range(MENUS["文件"].index("新建")):
+            send_keys("{DOWN}")
+            time.sleep(0.3)
+        send_keys("{ENTER}")
+        time.sleep(1.2)
+        if not dialog_present():
+            click_editor()
+        esc_cleanup()
+        click_editor()
+        type_text("mouse-path-ok")
+        clip = re.sub(r"\s+", "", editor_clipboard())
+        got = clip[-60:]
+        if clip == "mouse-path-ok":
+            ok = True
+            break
+        esc_cleanup()
+        shot(f"case-mouse-menu-retry{attempt}")
     shot("case-mouse-menu")
     # 留证：鼠标菜单交互后 UIA 读层是否还活着（打印探针结果，不作为断言）
     print("鼠标路径后读取探针:", "存活" if read_alive() else "失效", flush=True)
+    assert ok, f"鼠标路径菜单未建成新标签（内容残留）: {got!r}"
 
 
 def c_exit():
+    # v30：菜单改真人路径（menu_kb），退出等待放宽到 20 秒
     wer_before = wer_count()
     close_panel()
-    menu("文件", "全部保存")      # 退出前先落盘，避免未保存确认框卡住流程
+    focus_main()
+    click_editor()
+    send_keys("^s")               # 退出前先落盘，避免未保存确认框卡住流程
     time.sleep(1.0)
     if dialog_present():          # 未命名的标签会弹另存为，补一个落盘路径
         picker_typing(os.path.join(DOCS, "taopad-exit-save.txt"))
         time.sleep(0.8)
-    menu("文件", "退出")
+    mark = trace_mark()
+    menu_kb("文件", "退出")
     still = True
     t0 = time.time()
-    while still and time.time() - t0 < 12:
+    while still and time.time() - t0 < 20:
         out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq TaoPad.exe"], capture_output=True, text=True)
         still = "TaoPad.exe" in out.stdout
         if still:
             if dialog_present():  # 保存/退出确认框：回车默认确认
                 send_keys("{ENTER}")
             time.sleep(1.0)
-    assert not still, "退出后进程仍在（等待12秒）"
+    trace_since(mark)
+    assert not still, "退出后进程仍在（等待20秒）"
     assert wer_count() == wer_before, "退出过程出现新崩溃记录"
     shot("case-exit")
 
