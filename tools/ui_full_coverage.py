@@ -314,23 +314,15 @@ def worker_main(argv):
                         break
                     if idx == len(titles) - 1:
                         ok = False
-                        try:
-                            target.invoke()
-                            ok = True
-                        except Exception:
-                            pass
-                        if not ok:
+                        for action in ("invoke", "select", "expand", "toggle", "click"):
+                            # v18：尝试链补 toggle/click——ToggleMenuFlyoutItem 的
+                            # SelectionItem/Invoke 均缺，Toggle/Click 是它真有的 pattern
                             try:
-                                target.select()
+                                getattr(target, action)()
                                 ok = True
+                                break
                             except Exception:
-                                pass
-                        if not ok:
-                            try:
-                                target.expand()
-                                ok = True
-                            except Exception:
-                                pass
+                                continue
                         found = "OK" if ok else f"NOINVOKE:{tname}"
                     else:
                         ok2 = False
@@ -689,11 +681,12 @@ def _open_top_keyboard(t):
 
 
 def menu(*titles):
-    """v13：主路径改为 UIA 直呼菜单——无鼠标无键盘、不经焦点，直接触发
-    菜单项 Click。第十轮查明：键盘路径在云端从未真正点中下拉项（此前
-    V02/V03/T01 仅截图无断言，属空过；语言/编码状态栏从未变过，且源码
-    实证 Click 处理器会立即刷新状态栏）。UIA 直呼后打印读层存活情况，
-    留观「invoke 是否同鼠标一样拖垮读层」。失败时退回 v12 键盘流程。"""
+    """v18：主路径 UIA 直呼；直呼失败**禁用键盘回退**——定谳班 43552147010
+    调用栈实锤：五班 E07 进程"安静消失"= 键盘回退乱序键入误触「文件→退出」
+    （F10/RIGHT/ENTER/DOWN 落点不可控，ENTER 点中退出项 → OnExit → ExitAll
+    → Environment.Exit(0)，无崩溃痕迹）。v18 直呼失败改为 ESC 清浮层后再试
+    一轮直呼（worker 自带 3 次枚举重试），仍失败就让用例断言失败——
+    宁可 FAIL 本用例，不可误触退出拖死整班。"""
     close_panel()
     out = worker_run(["menu_invoke", str(WIN_HANDLE), "|".join(titles)])
     ok = "MENUINVOKE OK" in out
@@ -703,35 +696,30 @@ def menu(*titles):
             f.write(f"{time.strftime('%H:%M:%S')} menu({'|'.join(titles)}) -> {out!r}\n")
     except Exception:
         pass
+    if not ok:
+        # v18：ESC 清浮层后再试一轮直呼；键盘回退已废弃（误触退出实锤）
+        try:
+            from pywinauto.keyboard import send_keys as _sk
+            _sk("{ESC}")
+            time.sleep(0.6)
+        except Exception:
+            pass
+        out = worker_run(["menu_invoke", str(WIN_HANDLE), "|".join(titles)])
+        ok = "MENUINVOKE OK" in out
+        print(f"菜单[{'>'.join(titles)}]UIA直呼重试: {out!r}", flush=True)
+        try:
+            with open(os.path.join(EVID, "menu_invoke_trace.log"), "a", encoding="utf-8") as f:
+                f.write(f"{time.strftime('%H:%M:%S')} menu-retry({'|'.join(titles)}) -> {out!r}\n")
+        except Exception:
+            pass
     if ok:
         print(f"读层存活: {read_alive()}", flush=True)
         if dialog_present():
             click_editor()   # 下拉未自动收起时点编辑区收尾
         return
-    send_keys("{F10}")
-    time.sleep(0.9)
-    topi = TOPMENUS.index(titles[0])
-    for _ in range(topi):
-        send_keys("{RIGHT}")
-        time.sleep(0.35)
-    send_keys("{ENTER}")
-    time.sleep(1.0)
-    if len(titles) > 1:
-        lst = MENUS[titles[0]]
-        for _ in range(lst.index(titles[1])):
-            send_keys("{DOWN}")
-            time.sleep(0.35)
-        if len(titles) > 2:
-            send_keys("{RIGHT}")
-            time.sleep(1.0)
-            sub = SUBMENUS[titles[1]]
-            for _ in range(sub.index(titles[2])):
-                send_keys("{DOWN}")
-                time.sleep(0.35)
-        send_keys("{ENTER}")
-        time.sleep(1.1)
-    if not dialog_present():
-        click_editor()   # 菜单操作后焦点常留在菜单栏，点回编辑区
+    # v18：两轮直呼都失败，放弃本菜单操作（用例稍后以状态栏断言 FAIL 收场）。
+    # 不再 send_keys 键盘回退——那会误触「文件→退出」终结整个班次。
+    print(f"菜单[{'>'.join(titles)}]两轮直呼失败，放弃键盘回退（v18 防误触退出）", flush=True)
 
 
 def texts():
