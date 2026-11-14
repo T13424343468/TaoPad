@@ -138,6 +138,41 @@ def rawwalk_texts(h):
             print("RAWWALK2", f"children={len(kids)}", flush=True)
         except Exception as _e:
             print("RAWWALK2 child-enum ERR", type(_e).__name__, _e, flush=True)
+        # v27：子窗桥直连仍摸不到正文（RAWWALK nodes=4 实锤）——改从桌面根全树 DFS，
+        # 按 ProcessId 过滤出本进程的全部元素（inspect.exe 等价视角，不依赖 hwnd 归属）
+        try:
+            _pid = ctypes.windll.user32.GetWindowThreadProcessId(int(h), None)
+            stack_pid = [iuia.GetRootElement()]
+            seen_pid = 0
+            pid_names = []
+            while stack_pid and seen_pid < 30000:
+                cur = stack_pid.pop()
+                seen_pid += 1
+                try:
+                    if cur.CurrentProcessId == _pid:
+                        try:
+                            n = cur.CurrentName
+                            if n and n.strip():
+                                pid_names.append(n.strip())
+                        except Exception:
+                            pass
+                except Exception:
+                    continue
+                try:
+                    child = walker.GetFirstChildElement(cur)
+                    sibs = []
+                    while child is not None and len(sibs) < 400:
+                        sibs.append(child)
+                        child = walker.GetNextSiblingElement(child)
+                    stack_pid.extend(reversed(sibs))
+                except Exception:
+                    continue
+            print("RAWWALK3", f"pid={_pid}, nodes={seen_pid}, named={len(pid_names)}", flush=True)
+            if len(pid_names) > len(names):
+                names = pid_names
+        except Exception as _e:
+            print("RAWWALK3 ERR", type(_e).__name__, _e, flush=True)
+
         stack = []
         seen = 0
         for hcur in handles:
