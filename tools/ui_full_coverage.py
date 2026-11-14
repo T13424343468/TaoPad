@@ -67,6 +67,14 @@ def esc_clear():
     except Exception:
         pass
 
+
+def close_menus_uia():
+    """v19：UIA 确定性收层（父进程侧入口，worker_run 转发到 worker 内执行）。
+    v18 班实锤（run 43554708080 失败截图：E07 现场语言下拉悬空未关）：WinUI MenuBar
+    弹出层打开期间主窗 UIA 读层整树返空（状态栏断言得 []、菜单枚举 MISS），且 ESC
+    收不掉弹出层时连锁拖垮后续所有用例。本函数返回 worker 的收层输出或 ERR 标记。"""
+    return worker_run(["close_menus", str(WIN_HANDLE)])
+
 # ---------------- 子进程工作器 ----------------
 
 def worker_run(argv):
@@ -203,6 +211,34 @@ def worker_main(argv):
             except Exception:
                 continue
         print("NOTFOUND")
+    elif mode == "close_menus":
+        # v19：UIA 确定性收层。对每个 MenuBarItem 依次尝试 collapse / expand（切换收起）/
+        # click_input（再点一次即收起）三链，任一成功即算收层；全部失败回 ESC 兜底。
+        h = int(argv[1])
+        closed = 0
+        try:
+            app = Application(backend="uia").connect(handle=h)
+            win = app.window(handle=h)
+            for d in win.descendants(control_type="MenuItem"):
+                done = False
+                for act in ("collapse", "expand", "click_input"):
+                    try:
+                        getattr(d, act)()
+                        done = True
+                        break
+                    except Exception:
+                        continue
+                if done:
+                    closed += 1
+        except Exception as e:
+            print(f"CLOSEMENUS ERR:{type(e).__name__}", flush=True)
+        print(f"CLOSEMENUS closed={closed}", flush=True)
+        if closed == 0:
+            try:
+                from pywinauto.keyboard import send_keys as _sk
+                _sk("{ESC}")
+            except Exception:
+                pass
     elif mode in ("read_texts", "count_edits", "has_edit", "menu_item_visible", "menu_invoke"):   # v16：白名单漏了 menu_invoke，内层分支从未可达（第十二轮空回音、第十三轮只有进门回执的根因）
         h = int(argv[1])
         title = argv[2] if mode == "menu_item_visible" else None
@@ -314,7 +350,7 @@ def worker_main(argv):
                         break
                     if idx == len(titles) - 1:
                         ok = False
-                        for action in ("invoke", "select", "expand", "toggle", "click"):
+                        for action in ("invoke", "select", "expand", "toggle", "click", "click_input"):
                             # v18：尝试链补 toggle/click——ToggleMenuFlyoutItem 的
                             # SelectionItem/Invoke 均缺，Toggle/Click 是它真有的 pattern
                             try:
@@ -353,17 +389,60 @@ def worker_main(argv):
                         if not ok2:
                             found = f"NOEXPAND:{tname}"
                             break
-                        time.sleep(0.8)
+                        # v19：弹出层 hwnd 就绪有延迟（r19 实锤 0.8s 常常不够，导致下一级
+                        # 枚举 MISS）。改为轮询等待下一级菜单项出现，最多 4 秒。
+                        _next_t = titles[idx + 1]
+                        _deadline = time.time() + 4.0
+                        while time.time() < _deadline:
+                            _hit = False
+                            try:
+                                for w2 in ([win2] + same_pid()):
+                                    try:
+                                        for d2 in w2.descendants(control_type="MenuItem"):
+                                            try:
+                                                if (d2.window_text() or "").strip() == _next_t:
+                                                    _hit = True
+                                                    break
+                                            except Exception:
+                                                continue
+                                    except Exception:
+                                        pass
+                                    if _hit:
+                                        break
+                            except Exception:
+                                pass
+                            if _hit:
+                                break
+                            time.sleep(0.5)
             except Exception as e:
                 found = f"ERR:{type(e).__name__}"
             if not found.startswith(("OK", "ERR:none")):
-                esc_clear()   # v17：失败收尾再清一次浮层，防滞留拖垮下一轮读取
+                # v19：失败收尾改 UIA 确定性收层——ESC 收不住 MenuBar 弹出层是
+                # r19 实锤根因（run 43554708080 失败截图：语言下拉悬空未关）。
+                # 对每个 MenuItem 依次 collapse/expand/click_input 收层，
+                # 全部失败再兜一轮 ESC。防悬层拖垮下一条用例。
+                _closed = 0
                 try:
-                    from pywinauto.keyboard import send_keys as _sk2
-                    _sk2("{ESC}")
-                    time.sleep(0.4)
+                    for _d in win2.descendants(control_type="MenuItem"):
+                        for _act in ("collapse", "expand", "click_input"):
+                            try:
+                                getattr(_d, _act)()
+                                _closed += 1
+                                break
+                            except Exception:
+                                continue
                 except Exception:
                     pass
+                if _closed > 0:
+                    time.sleep(0.4)
+                else:
+                    esc_clear()   # v17：UIA 收层全败时再清一次浮层
+                    try:
+                        from pywinauto.keyboard import send_keys as _sk2
+                        _sk2("{ESC}")
+                        time.sleep(0.4)
+                    except Exception:
+                        pass
             print("MENUINVOKE", found)
         elif mode == "count_edits":
             cnt = -1
@@ -725,6 +804,12 @@ def menu(*titles):
                 f.write(f"{time.strftime('%H:%M:%S')} menu-retry({'|'.join(titles)}) -> {out!r}\n")
         except Exception:
             pass
+    # v19：无论成败，确定性收净 MenuBar 弹出层——r19 实锤悬空下拉导致主窗
+    # UIA 读层整树返空、后续用例连锁全挂。收层后再读状态栏与下一个用例才可靠。
+    try:
+        close_menus_uia()
+    except Exception:
+        pass
     if ok:
         print(f"读层存活: {read_alive()}", flush=True)
         if dialog_present():
