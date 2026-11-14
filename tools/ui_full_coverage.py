@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 TaoPad 云端真机全功能界面自动化（v14，直呼回传修复版）
 每次界面元素枚举/点击都在独立 Python 子进程里完成——
@@ -76,6 +76,36 @@ def close_menus_uia():
     return worker_run(["close_menus", str(WIN_HANDLE)])
 
 # ---------------- 子进程工作器 ----------------
+
+def child_bridges(h):
+    """WinUI3 正文挂在 DesktopChildSiteBridge 子 hwnd 上（43580989437 实锤：
+    顶层窗口 UIA 树只有标题栏按钮+菜单浮层，标签页/编辑器/状态栏整块对
+    ControlView 盲——两轮产品侧补挂无效后的采数端换刀）。"""
+    out = []
+    try:
+        import win32gui
+        def cb(hc, _):
+            try:
+                cls = win32gui.GetClassName(hc)
+                if 'Bridge' in cls or 'DesktopChildSite' in cls:
+                    out.append(hc)
+            except Exception:
+                pass
+        win32gui.EnumChildWindows(h, cb, None)
+    except Exception:
+        pass
+    return out
+
+
+def bridge_windows(h):
+    ws = []
+    for hc in child_bridges(h):
+        try:
+            ws.append(Desktop(backend="uia").window(handle=hc, visible_only=False))
+        except Exception:
+            continue
+    return ws
+
 
 def worker_run(argv):
     """独立进程做 UIA 操作，返回 stdout 字符串。v14：兜底超时与异常，
@@ -257,8 +287,9 @@ def worker_main(argv):
             except Exception:
                 return None
 
-        # 多通道：句柄连接失败或读空时，按标题重找窗口再试
-        sources = [w for w in (win,) if w is not None] + [None]
+        # 多通道：句柄连接失败或读空时，按标题重找窗口再试；
+        # v23：补 DesktopChildSiteBridge 子窗通道（正文 UIA 挂在桥上，43580989437 实锤）
+        sources = [w for w in (win,) if w is not None] + bridge_windows(h) + [None]
         if mode == "read_texts":
             names = []
             for w in sources:
@@ -344,7 +375,7 @@ def worker_main(argv):
                 for idx, tname in enumerate(titles):
                     target = None
                     for attempt in range(3):   # v17：枚举不到先清浮层再重试
-                        scopes = [win2] + (same_pid() if idx == 0 else [])   # v19：顶级项也扫同进程窗口（父浮层未收起时菜单栏可能挂在弹层）
+                        scopes = [win2] + bridge_windows(h) + (same_pid() if idx == 0 else [])   # v19：顶级项也扫同进程窗口（父浮层未收起时菜单栏可能挂在弹层）；v23 补桥通道
                         for scope in scopes:
                             try:
                                 for d in scope.descendants(control_type="MenuItem"):
@@ -413,7 +444,7 @@ def worker_main(argv):
                         while time.time() < _deadline:
                             _hit = False
                             try:
-                                for w2 in ([win2] + same_pid()):
+                                for w2 in ([win2] + bridge_windows(h) + same_pid()):
                                     try:
                                         for d2 in w2.descendants(control_type="MenuItem"):
                                             try:
