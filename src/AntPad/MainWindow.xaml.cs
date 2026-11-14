@@ -1190,6 +1190,9 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             _ => doc.Eol,
         };
         doc.Eol = eol;
+        // v32 修 C02：落盘字节由 Editor 的 OutputEol 决定（SaveDocAsync 走
+        // Text getter），只写 doc.Eol 只改状态栏显示。菜单选择必须同步进去。
+        doc.Editor.SetEol(eol);
         UpdateEolChecks();
         UpdateStatus();
     }

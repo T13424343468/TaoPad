@@ -673,6 +673,59 @@ def worker_main(argv):
             except Exception:
                 continue
         print("NOTFOUND")
+    elif mode == "menu_hit":
+        # v32：弹层项定位——扫同进程全部窗口（主窗+桥子窗+弹层顶层）里的
+        # MenuItem，命中目标返回中心坐标。五班实锤键盘 DOWN/ENTER 在鼠标开菜单
+        # 后落点不可控（V03 反复切自动换行、C01/C02 落 idx0），逐级矩形+鼠标
+        # 点击是唯一落点可控的真人路径。弹层是独立顶层 hwnd，主窗树常看不到它，
+        # 必须扫同 pid 全部窗口（menu_invoke 的 same_pid 扫法复用）。
+        h = int(argv[1])
+        title = argv[2]
+        win2 = None
+        pid = None
+        try:
+            win2 = Application(backend="uia").connect(handle=h).window(handle=h)
+            pid = win2.process_id()
+        except Exception:
+            pass
+
+        def hit_scopes():
+            s = []
+            if win2 is not None:
+                s.append(win2)
+            s += bridge_windows(h)
+            if pid is not None:
+                try:
+                    for w in Desktop(backend="uia").windows():
+                        try:
+                            if w.process_id() == pid and w.handle != h:
+                                s.append(w)
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+            return s
+
+        best = None
+        try:
+            for s in hit_scopes():
+                try:
+                    for d in s.descendants(control_type="MenuItem"):
+                        try:
+                            if (d.window_text() or "").strip() == title:
+                                r = d.rectangle()
+                                best = ((r.left + r.right) // 2, (r.top + r.bottom) // 2)
+                                break
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+                if best:
+                    break
+        except Exception as e:
+            print(f"HITERR {type(e).__name__}", flush=True)
+            best = None
+        print(f"HIT {best[0]} {best[1]}" if best else "MISS", flush=True)
     elif mode == "click_last_edit":
         h = int(argv[1])
         app = Application(backend="uia").connect(handle=h)
@@ -1431,37 +1484,90 @@ def trace_since(mark):
     return out
 
 
+# v32：菜单栏顶级项相对坐标（B 班截图实测，窗口默认尺寸 754x510 不变，
+# 相对窗口左上角）。UIA 失明时 worker mouse_menu 找不到矩形的兜底。
+TOP_MENU_XY = {
+    "文件": (32, 58), "编辑": (89, 58), "搜索": (145, 58), "查看": (198, 58),
+    "语言": (256, 58), "编码": (313, 58), "主题": (368, 58), "工具": (424, 58),
+}
+
+
+def _click_top_by_layout(top):
+    """v32：顶级菜单固定坐标兜底（仅顶级）。窗口位置 main() 已固定 (100,80)、
+    尺寸不变，相对偏移稳定；点击后返回 True 交由后续 menu_hit 验证 flyout。"""
+    xy = TOP_MENU_XY.get(top)
+    if not xy:
+        return False
+    try:
+        import win32gui
+        l, t, _r, _b = win32gui.GetWindowRect(WIN_HANDLE)
+    except Exception:
+        return False
+    x, y = l + xy[0], t + xy[1]
+    ctypes.windll.user32.SetCursorPos(x, y)
+    ctypes.windll.user32.mouse_event(2, 0, 0, 0, 0)
+    ctypes.windll.user32.mouse_event(4, 0, 0, 0, 0)
+    time.sleep(0.8)
+    print(f"顶级[{top}]布局兜底点击 ({x},{y})", flush=True)
+    return True
+
+
+def worker_menu_hit(title, wait=6.0):
+    """v32：弹层项定位。worker 扫同进程全部窗口（主窗+桥+弹层顶层）找目标
+    MenuItem 矩形，轮询等待（弹层 hwnd 就绪有延迟，r19 实锤 0.8s 常不够）。"""
+    t0 = time.time()
+    while time.time() - t0 < wait:
+        out = worker_run(["menu_hit", str(WIN_HANDLE), title])
+        m = re.search(r"HIT (-?\d+) (-?\d+)", out)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+        time.sleep(0.7)
+    return None
+
+
+def _click_xy(x, y):
+    ctypes.windll.user32.SetCursorPos(x, y)
+    ctypes.windll.user32.mouse_event(2, 0, 0, 0, 0)
+    ctypes.windll.user32.mouse_event(4, 0, 0, 0, 0)
+    time.sleep(0.7)
+
+
 def menu_kb(*titles):
-    """v30：真人路径菜单导航（规范十维度③：只许点/滑/拖，禁接口直达绕界面）。
-    鼠标点顶级菜单（worker 坐标点击）→ 键盘 DOWN 逐项 → 子菜单 RIGHT → 叶子 ENTER。
-    只向前 DOWN、ENTER 只落在目标叶子，规避 v18 键盘回退误触退出实锤。
-    顶级点击失败时 F10 键序开菜单（同样真人键序），导航效果由用例自行断言。"""
+    """v32：全鼠标逐项点击 + 每步 UIA 验证（换思路，五班实锤收官）。
+    旧键序路径四班连红：鼠标点开菜单后键盘 DOWN 被吞/ENTER 落第 0 项
+    （V03 反复切自动换行、C01/C02 编码换行落 idx0、L01/E07 注释未执行）；
+    F10 兜底探针用常驻 MenuBarItem「文件」作探针，树失明时误杀、也测不出
+    真没拉起。新路径：顶级 = UIA 矩形点击、失败走固定坐标兜底；下级 =
+    worker 扫同进程窗口定位弹层项矩形 → 坐标点击（父项点击=展开子菜单，
+    叶项点击=执行）；下一级出现即验证。全程无键入（不落编辑器、无误触
+    退出）。失败返回 False，用例以自身断言诚实记红。"""
     close_panel(verify=False)
     mark = trace_mark()
     top = titles[0]
-    ok = worker_click_menu(top)
+    ok = worker_click_menu(top) or _click_top_by_layout(top)
     if not ok:
-        ok = _open_top_keyboard(top)
+        esc_cleanup()
+        ok = worker_click_menu(top) or _click_top_by_layout(top)
     if not ok:
+        print(f"menu[{'>'.join(titles)}] 顶级点击失败（UIA+布局兜底均未命中）", flush=True)
         return False
-    time.sleep(0.9)
+    time.sleep(1.0)
     for depth in range(1, len(titles)):
         title = titles[depth]
-        if title in MENUS.get(top, []):
-            idx = MENUS[top].index(title)
-        else:
-            idx = SUBMENUS.get(titles[depth - 1], []).index(title)
-        for _ in range(idx):
-            send_keys("{DOWN}")
-            time.sleep(0.3)
-        if title in SUBMENUS:
-            send_keys("{RIGHT}")     # 有子菜单的项：RIGHT 展开（与最近文件同路）
-            time.sleep(0.8)
-        else:
-            send_keys("{ENTER}")
-            time.sleep(0.8)
+        pos = worker_menu_hit(title, wait=6.0)
+        if pos is None:
+            # 弹层未展开/未就绪：收层重开顶级再找一轮
+            esc_cleanup()
+            if worker_click_menu(top) or _click_top_by_layout(top):
+                time.sleep(1.0)
+                pos = worker_menu_hit(title, wait=6.0)
+        if pos is None:
+            esc_cleanup()
+            print(f"menu[{'>'.join(titles)}] 弹层项[{title}]定位失败", flush=True)
+            return False
+        _click_xy(*pos)
     trace_since(mark)
-    return ok
+    return True
 
 
 def copy_current_line():
@@ -1606,13 +1712,15 @@ def c_lineno_toggle():
     time.sleep(0.6)
     a1 = grab_img()
     shot("case-lineno-off")
-    d1 = _pixel_changed(a0, a1, crop=(0.0, 0.15, 0.18, 0.85))
+    d1 = _pixel_changed(a0, a1, crop=(0.0, 0.12, 0.30, 0.85))
     menu_kb("查看", "显示行号")
     time.sleep(0.6)
     a2 = grab_img()
     shot("case-lineno-on")
-    d2 = _pixel_changed(a1, a2, crop=(0.0, 0.15, 0.18, 0.85))
-    # 实测行号两行数字在左带约占 0.001 差分（43592341121 读数 0.00091/0.00106）
+    d2 = _pixel_changed(a1, a2, crop=(0.0, 0.12, 0.30, 0.85))
+    # v32：crop 加宽 0.18→0.30——行号数字渲染在 x≈183-186（1024 宽）恰在旧
+    # 右界压线，防裁切假红；v31 差分 0 的真因是菜单未执行（两帧截图 diff=0），
+    # 非裁切，但边界压线仍属脆弱点一并修。
     assert d1 > 0.0006 and d2 > 0.0006, f"行号开关画面无变化: off段={d1:.5f} on段={d2:.5f}"
 
 
@@ -1779,6 +1887,9 @@ def c_save():
     focus_main()
     click_editor()
     esc_cleanup()
+    send_keys("^n")        # v32：强制新未命名标签，^s 必走保存选择器
+    time.sleep(0.9)        #（B 班 O01 实锤：已命名标签 ^s 直接落盘不弹选择器，
+    click_editor()         #  picker_typing 把路径粘进编辑器→O01/O02 级联红）
     send_keys("^a{DEL}")
     type_text("save-me-内容")
     focus_main()
@@ -1919,8 +2030,10 @@ def c_settings():
 
 
 def c_mouse_menu():
-    """v30：鼠标路径专项对照（保留原口径）。先落已知标记内容再开菜单——
-    导航失败时残留可辨、可整轮重试，不再一击定生死。"""
+    """v32：与 menu_kb 同为全鼠标路径（键序路径四班连红已废弃）。保留本用例
+    双重价值：①鼠标菜单建新标签；②交互后 UIA 读层存活探针（软件侧待查缺陷：
+    鼠标菜单交互拖瘫 UIA Text 供给，多班实锤）。先落已知标记内容再开菜单——
+    导航失败时残留可辨、可整轮重试。"""
     close_panel()
     ok = False
     got = ""
@@ -1928,15 +2041,17 @@ def c_mouse_menu():
         click_editor()
         send_keys("^a{DEL}")
         type_text("pre-menu-marker")
-        if not worker_click_menu("文件"):
+        opened = worker_click_menu("文件") or _click_top_by_layout("文件")
+        if not opened:
             send_keys("{ESC}")
             time.sleep(0.5)
             continue
         time.sleep(1.0)
-        for _ in range(MENUS["文件"].index("新建")):
-            send_keys("{DOWN}")
-            time.sleep(0.3)
-        send_keys("{ENTER}")
+        pos = worker_menu_hit("新建", wait=6.0)
+        if pos is None:
+            esc_cleanup()
+            continue
+        _click_xy(*pos)
         time.sleep(1.2)
         if not dialog_present():
             click_editor()
@@ -2047,6 +2162,16 @@ def main():
     WIN_HANDLE = win.handle
     global APP_WINDOW
     APP_WINDOW = win
+    # v32：主窗位置固定 (100,80)、尺寸不变——菜单布局兜底坐标基于窗口左上
+    # 相对偏移（B 班截图实测），位置不固定则兜底失效。
+    try:
+        import win32gui
+        _l, _t, _r, _b = win32gui.GetWindowRect(WIN_HANDLE)
+        ctypes.windll.user32.SetWindowPos(WIN_HANDLE, 0, 100, 80, 0, 0, 0x0001 | 0x0004)
+        time.sleep(0.6)
+        print(f"窗口位置固定: 原({_l},{_t}) -> (100,80)，尺寸不变 {_r-_l}x{_b-_t}", flush=True)
+    except Exception as e:
+        print("窗口位置固定失败（布局兜底不可用）:", e, flush=True)
     time.sleep(1)
     worker_dump()
 

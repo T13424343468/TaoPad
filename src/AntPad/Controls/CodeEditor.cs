@@ -1176,6 +1176,16 @@ public sealed class CodeEditor : Grid
     /// <summary>对外文本：按文档换行风格输出（保存时还原原始换行符）。</summary>
     string OutputEol { get; set; } = "\r\n";
 
+    /// <summary>菜单「编码>换行符」的落盘口径：用户明确选择的换行风格写入
+    /// OutputEol，保存/导出即按它展开（v32 修 C02——此前菜单只写 MainWindow 的
+    /// doc.Eol 改状态栏显示，SaveDocAsync 走 Text getter 仍按内容探测的
+    /// OutputEol 落盘，菜单选择永远不生效）。打开旧文件时 Text setter 的内容
+    /// 探测先行，两者天然一致；此后用户切换以菜单为准。</summary>
+    public void SetEol(string eol)
+    {
+        if (eol == "\r\n" || eol == "\n" || eol == "\r") OutputEol = eol;
+    }
+
     int SelPos => _rich
         ? (int)(_re.Document?.Selection?.StartPosition ?? 0)
         : _tb.SelectionStart;
