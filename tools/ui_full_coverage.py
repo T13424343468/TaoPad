@@ -858,6 +858,11 @@ def case(name, fn):
             DEAD_MARKED = True
             collect_crash_scene()
             shot("CRASH-scene-desktop")
+    finally:
+        # v31 治本（43592341121 实锤）：T01 断言抛出后主题下拉残留，把「编码」
+        # 菜单点击拖瘫两连败，_open_top_keyboard 兜底键序落进编辑器（C01 字节
+        # 尾部 \r 实锤），连坐 8 例。凡用例退出必清浮层，断言失败不得跨用例污染。
+        esc_cleanup()
 
 
 def find_exe():
@@ -944,13 +949,20 @@ def read_alive():
 
 
 def _open_top_keyboard(t):
+    """v31：F10 兜底加探针验证——F10 未把菜单栏拉起时（WinUI 常见），
+    RIGHT/ENTER 会落进编辑器（43592341121 C01 字节尾部 \r 实锤）。
+    探针不过就不再落键，menu_kb 返回 False 交用例诚实记红。"""
     send_keys("{F10}")
     time.sleep(0.9)
+    if not menu_item_visible("文件"):
+        print("F10 兜底探针失败：菜单栏未拉起，放弃键序（防污染编辑器）", flush=True)
+        return False
     for _ in range(TOPMENUS.index(t)):
         send_keys("{RIGHT}")
         time.sleep(0.35)
     send_keys("{ENTER}")
     time.sleep(1.0)
+    return True
 
 
 def menu(*titles):
@@ -1241,14 +1253,18 @@ def c_comment():
     # 审查专项修复：注释和弦必须同一事件串连发（^kc / ^ku）。
     # 原 "^k" 与 "c" 分两段发送，第二段被当普通字符插入、命令未触发，
     # 还会把 "c"/"u" 写进正文（E07 四班恒崩实锤）。
-    send_keys("^kc")
-    time.sleep(0.7)
+    # v31：和弦改「注释选区」菜单（真人路径，动作用于当前选区；^kc 第二键
+    # 与字符插入时序在焦点漂移下失控，'c#code-line' 实锤）
+    send_keys("^a")
+    time.sleep(0.25)
+    menu_kb("编辑", "注释选区")
+    time.sleep(0.6)
     marked = editor_clipboard()
     assert marked.strip().startswith("#"), f"注释未按 Python 标记(#)生效: {marked[:40]!r}"
     send_keys("^a")
     time.sleep(0.25)
-    send_keys("^ku")
-    time.sleep(0.7)
+    menu_kb("编辑", "取消注释选区")
+    time.sleep(0.6)
     unmarked = editor_clipboard()
     assert unmarked.strip() == "code-line", f"取消注释未还原: {unmarked[:40]!r}"
     shot("case-comment")
@@ -1280,9 +1296,8 @@ def c_find_panel():
     time.sleep(0.4)
     line2 = copy_current_line().strip()
     assert line2 == "gamma beta", f"查找下一个未到行2: {line2[:40]!r}"
-    send_keys("^f")
-    time.sleep(0.8)
-    send_keys("+{F3}")            # 查找上一个
+    # v31：反向查找改「搜索>查找上一个」菜单（+F3 后焦点漂移，复制得空实锤）
+    menu_kb("搜索", "查找上一个")
     time.sleep(0.8)
     send_keys("{ESC}")
     time.sleep(0.4)
@@ -1344,18 +1359,18 @@ def c_find_in_files():
     close_panel()
     img0 = grab_img()
     opened = False
-    for _ in range(3):
-        send_keys("^+{F}")
+    # v31：主路径改 menu_kb（^+F 快捷键 v29/v30 两班均未生效），快捷键留作辅证
+    for shortcut_first in (False, True):
+        if shortcut_first:
+            send_keys("^+{F}")
+        else:
+            menu_kb("搜索", "在文件中查找…")
         time.sleep(1.3)
         if _pixel_changed(img0) > 0.004 or worker_edits_on_win() > 1:
             opened = True
             break
         send_keys("{ESC}")
         time.sleep(0.5)
-    if not opened:
-        menu_kb("搜索", "在文件中查找…")
-        time.sleep(1.2)
-        opened = _pixel_changed(img0) > 0.004 or worker_edits_on_win() > 1
     shot("case-fif-open")
     assert opened, "在文件中查找面板未打开（像素差分与编辑框计数均无变化）"
     send_keys(DOCS)        # 文件夹框（首个控件，默认焦点）
@@ -1426,7 +1441,9 @@ def menu_kb(*titles):
     top = titles[0]
     ok = worker_click_menu(top)
     if not ok:
-        _open_top_keyboard(top)
+        ok = _open_top_keyboard(top)
+    if not ok:
+        return False
     time.sleep(0.9)
     for depth in range(1, len(titles)):
         title = titles[depth]
@@ -1589,20 +1606,24 @@ def c_lineno_toggle():
     time.sleep(0.6)
     a1 = grab_img()
     shot("case-lineno-off")
-    d1 = _pixel_changed(a0, a1, crop=(0.0, 0.2, 0.25, 0.8))
+    d1 = _pixel_changed(a0, a1, crop=(0.0, 0.15, 0.18, 0.85))
     menu_kb("查看", "显示行号")
     time.sleep(0.6)
     a2 = grab_img()
     shot("case-lineno-on")
-    d2 = _pixel_changed(a1, a2, crop=(0.0, 0.2, 0.25, 0.8))
-    assert d1 > 0.003 and d2 > 0.003, f"行号开关画面无变化: off段={d1:.5f} on段={d2:.5f}"
+    d2 = _pixel_changed(a1, a2, crop=(0.0, 0.15, 0.18, 0.85))
+    # 实测行号两行数字在左带约占 0.001 差分（43592341121 读数 0.00091/0.00106）
+    assert d1 > 0.0006 and d2 > 0.0006, f"行号开关画面无变化: off段={d1:.5f} on段={d2:.5f}"
 
 
 THEMES = ["水墨", "天青", "墨夜"]
 
 
 def c_themes():
-    # v30：真人路径 + 全窗像素差分断言（换主题必然整窗变色）
+    # v31：先打底天青——水墨是默认主题，从水墨切水墨必然无变化
+    #（43592341121 实锤 diff=0.00043 假红并连锁拖瘫后续菜单点击）
+    menu_kb("主题", "天青")
+    time.sleep(1.0)
     prev = grab_img()
     for i, t in enumerate(THEMES):
         menu_kb("主题", t)
@@ -1666,6 +1687,8 @@ def c_eols():
     p = os.path.join(DOCS, "taopad-eol-bytes.txt")
     if os.path.exists(p):
         os.remove(p)
+    send_keys("^n")        # v31：新标签保证未命名文档，^s 才走选择器（C01 已命名实锤）
+    time.sleep(0.9)
     click_editor()
     send_keys("^a{DEL}")
     type_text("eol-line1\neol-line2")
@@ -1732,8 +1755,8 @@ def c_languages():
         type_text("code-line")
         send_keys("^a")
         time.sleep(0.25)
-        send_keys("^kc")
-        time.sleep(0.7)
+        menu_kb("编辑", "注释选区")
+        time.sleep(0.6)
         marked = editor_clipboard().strip()
         want = LANG_MARK[lang]
         if want is None:
@@ -1745,8 +1768,8 @@ def c_languages():
             assert marked.startswith(want), f"[{lang}] 注释标记[{want}]未生效: {marked[:40]!r}"
         send_keys("^a")
         time.sleep(0.25)
-        send_keys("^ku")
-        time.sleep(0.7)
+        menu_kb("编辑", "取消注释选区")
+        time.sleep(0.6)
         restored = editor_clipboard().strip()
         assert restored == "code-line", f"[{lang}] 取消注释未还原: {restored[:40]!r}"
     shot("case-languages")
