@@ -53,6 +53,7 @@ HTML_OUT = os.path.join(DOCS, "taopad-export.html")
 
 RESULTS = []
 WIN_HANDLE = None
+APP_WINDOW = None
 
 # ---------------- 子进程工作器 ----------------
 
@@ -490,8 +491,19 @@ def record(name, ok, detail=""):
     flush_report()
 
 
+def refocus_app():
+    r"""hosted agent 控制台会间歇抢走前台，导致 send_keys 误入控制台；
+    证据：失败截图里前台是 C:\ProgramData\GitHub\Host 终端，TaoPad 被压在后面。
+    每个用例执行前把应用窗口拉回前台。"""
+    try:
+        if APP_WINDOW is not None:
+            APP_WINDOW.set_focus()
+    except Exception:
+        pass
+
 def case(name, fn):
     mem_probe(name)
+    refocus_app()
     try:
         fn()
         record(name, True)
@@ -1329,9 +1341,23 @@ def main():
     from pywinauto import Application, Desktop
     app = Application(backend="uia").start(exe, timeout=25)
     time.sleep(12)
+    # 把宿主机 agent/PowerShell 控制台窗口全部最小化，防抢前台（证据：FAIL 截图前台为其终端）
+    try:
+        for w in Desktop(backend="uia").windows(visible_only=True):
+            t = (w.window_text() or "")
+            if t.startswith("C:\\") or ("GitHub" in t and "Host" in t):
+                try:
+                    w.minimize()
+                    print("已最小化控制台窗口:", t[:60], flush=True)
+                except Exception:
+                    pass
+    except Exception as e:
+        print("控制台最小化失败", e, flush=True)
     win = Desktop(backend="uia").window(title_re=".*TaoPad.*", visible_only=True)
     win.set_focus()
     WIN_HANDLE = win.handle
+    global APP_WINDOW
+    APP_WINDOW = win
     time.sleep(1)
     worker_dump()
 
