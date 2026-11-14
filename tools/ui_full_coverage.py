@@ -55,6 +55,17 @@ RESULTS = []
 WIN_HANDLE = None
 APP_WINDOW = None
 
+
+def esc_clear():
+    """模块级：ESC 清浮层。原嵌套在 menu_invoke 的 try 内，connect 失败即未绑定，
+    失败收尾路径必然 UnboundLocalError 把 worker 整个带崩（43532793701 A 场实锤）。"""
+    try:
+        from pywinauto.keyboard import send_keys as _sk
+        _sk("{ESC}")
+        time.sleep(0.6)
+    except Exception:
+        pass
+
 # ---------------- 子进程工作器 ----------------
 
 def worker_run(argv):
@@ -275,16 +286,6 @@ def worker_main(argv):
                     except Exception:
                         pass
                     return res
-
-                def esc_clear():
-                    # v17：读层拖垮自救——第十四轮实锤 select() 展开菜单后应用
-                    # UIA 供给整体空死，浮层滞留是嫌疑之一。先 ESC 清浮层再重试。
-                    try:
-                        from pywinauto.keyboard import send_keys as _sk
-                        _sk("{ESC}")
-                        time.sleep(0.6)
-                    except Exception:
-                        pass
 
                 for idx, tname in enumerate(titles):
                     target = None
