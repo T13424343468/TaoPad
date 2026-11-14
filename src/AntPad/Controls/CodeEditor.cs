@@ -44,6 +44,20 @@ public sealed class CodeEditor : Grid
         Windows.UI.Color.FromArgb(255, 84, 118, 168),   // 黛蓝
     };
     DispatcherQueueTimer? _colorTimer;
+    bool _colorPending;     // 有挂起未执行的着色回调（ScheduleRecolor 置位，Tick/收敛后清零）
+
+    /// <summary>整篇写入前强制同步收敛着色管线（审查 2026-11-14 红1）：
+    /// 停掉 220ms 防抖定时器；若尚有挂起未执行的着色回调，先同步补跑一次
+    /// Recolor 把内核格式化操作收敛完，再执行本次 SetText——
+    /// 杜绝异步着色回调与整篇写入在 RichEditBox 内核中交叠
+    /// （E07「切语言后立即注释」崩溃的头号嫌疑）。</summary>
+    void ConvergeRecolor()
+    {
+        try { _colorTimer?.Stop(); } catch { }
+        bool pending = _colorPending;
+        _colorPending = false;
+        if (pending) Recolor();
+    }
 
     // ---------- 行号栏 ----------
     readonly Canvas _gutter;            // 行号画布（左列）
@@ -1137,6 +1151,9 @@ public sealed class CodeEditor : Grid
         set
         {
             if (!_rich) { _tb.Text = value ?? ""; return; }
+            // 红1修复：写入前强制同步收敛——挂起的着色回调若不收敛，
+            // 220ms Tick 的批量 GetRange 与下面的整篇 SetText 会在内核中交叠
+            ConvergeRecolor();
             // 复位永远先行：写入中途失败也保证下次按当前文本重新着色
             // （失败场景多一次幂等重涂，无害；漏复位则新文本永远不上色）
             _lastColorText = "";
@@ -1149,8 +1166,10 @@ public sealed class CodeEditor : Grid
                 doc.BeginUndoGroup();
                 try { doc.SetText(TextSetOptions.None, value ?? ""); }
                 finally { doc.EndUndoGroup(); }
+                // 收敛时停掉了原来的回调，这里统一重排一次重着色，语义不变
+                ScheduleRecolor();
             }
-            catch { }
+            catch (Exception ex) { Services.CrashLog.Report(ex, "编辑器-整篇写入"); } // 黄2：不再静默
         }
     }
 
@@ -1645,6 +1664,7 @@ public sealed class CodeEditor : Grid
             _colorTimer.Stop();
             _colorTimer.Tick -= ColorTimerTick;
             _colorTimer.Tick += ColorTimerTick;
+            _colorPending = true;
             _colorTimer.Start();
         }
         catch { }
@@ -1653,6 +1673,7 @@ public sealed class CodeEditor : Grid
     void ColorTimerTick(object? s, object e)
     {
         try { _colorTimer?.Stop(); } catch { }
+        _colorPending = false;
         Recolor();
     }
 

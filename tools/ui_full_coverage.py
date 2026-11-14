@@ -959,17 +959,16 @@ def c_comment():
     n0 = len(editor_clipboard())
     send_keys("^a")
     time.sleep(0.25)
-    send_keys("^k")
-    time.sleep(0.3)
-    send_keys("c")
+    # 审查专项修复：注释和弦必须同一事件串连发（^kc / ^ku）。
+    # 原 "^k" 与 "c" 分两段发送，第二段被当普通字符插入、命令未触发，
+    # 还会把 "c"/"u" 写进正文（E07 四班恒崩实锤）。
+    send_keys("^kc")
     time.sleep(0.7)
     n1 = len(editor_clipboard())
     assert n1 > n0, f"注释未生效 {n0}->{n1}"
     send_keys("^a")
     time.sleep(0.25)
-    send_keys("^k")
-    time.sleep(0.3)
-    send_keys("u")
+    send_keys("^ku")
     time.sleep(0.7)
     n2 = len(editor_clipboard())
     assert n2 < n1, f"取消注释未生效 {n1}->{n2}"
