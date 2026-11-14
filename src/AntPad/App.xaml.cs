@@ -26,6 +26,14 @@ public partial class App : Application
     public static void UntrackWindow(Window w)
     {
         OpenWindows.Remove(w);
+        // 诊断留痕：云端五班 E07 进程"安静消失"（无崩溃/无 dump/WER/事件日志），
+        // 唯一符合的退出链就是这里——最后一个窗口关闭触发 ExitAll。
+        // 记录关闭源头调用栈，谁关的窗口一击必中。
+        try
+        {
+            Services.TraceLog.Write($"窗口关闭，剩余={OpenWindows.Count}；关闭源头：\n{Environment.StackTrace}");
+        }
+        catch { /* 留痕失败不影响退出 */ }
         if (OpenWindows.Count == 0) ExitAll();
     }
 
@@ -34,6 +42,7 @@ public partial class App : Application
     /// 因此显式退出，外加 1 秒兜底强杀——绝不留残留进程。</summary>
     public static void ExitAll()
     {
+        try { Services.TraceLog.Write("ExitAll 触发：框架退出+1秒兜底强杀"); } catch { }
         try { Current.Exit(); } catch { /* 框架退出失败走兜底 */ }
         _ = System.Threading.Tasks.Task.Run(async () =>
         {
