@@ -27,6 +27,15 @@ ALT 会把菜单栏置为"菜单模式"，随后的 F10 被当成关闭菜单，
 漏进编辑区。v11 去掉 ALT 置前，只保留句柄+按标题双通道读取；菜单打开
 后加一次可见性验证、未开重试一次；缩放改用底层按键（pywinauto 不认
 {ADD} 键名，此前一直被读层故障掩盖）。
+v33（五班实锤收官）：UIA 对弹层 hwnd 偶发可用不可依赖（同弹层 V02 命中
+/V03 MISS），菜单驱动改 menu_xy 纯坐标：顶级固定坐标点击（trace 实证必
+拉开）→ 窄条带行带扫描定位弹层项（序号=XAML 项序 + 期望 y 邻域双重校验，
+弹层拉开差分前置验证）→ 坐标点击；二级弹层锚父项行带 y+4、左缘按实测
+偏移。注释改编辑器和弦优先（CodeEditor.cs 原生两段式，keybd_event 直发）
++ 编辑菜单坐标兜底；O09 退出改 WM_CLOSE 直投（App 退出链源码闭环实锤）
++ 菜单坐标兜底；V01 缩放断言弃行带量测（v32 失灵实锤）改收层后整幅差分
++ 复位回基线双验；V02/V03/T01 一并改收层后取证，堵死"弹层开合差分"假
+绿通道（FAIL-V03 现场自动换行带勾实证 v32 只成一次 toggle）。
 覆盖：文件9/编辑16/搜索6/查看3组/语言13/编码5+3/主题3/设置/标签页/状态栏。
 v30（43589969300 实锤回灌）：UIA 文本管线 v24→v29 八连盲，全部停用——
 ①状态栏/缩放/匹配位置断言改源码揪清单通道：存盘字节级断言（编码 BOM/GBK/Big5、
@@ -1294,32 +1303,19 @@ def c_format():
 
 
 def c_comment():
-    # v30：不读状态栏。语言切换的实证 = 注释标记按该语言生效（Tokenizer.cs 标记表）
-    menu_kb("语言", "Python")
+    # v33：语言切换与注释全走无 UIA 路径——语言 menu_xy 坐标驱动；注释先
+    # 编辑器和弦（CodeEditor.cs 2403-2464 原生支持，keybd_event 直发），
+    # 剪贴板校验不达再退编辑菜单坐标路径（comment_op 两段自救）。
+    menu_xy("语言", "Python")
     time.sleep(0.6)
     click_editor()
     esc_cleanup()
     send_keys("^a{DEL}")
     type_text("code-line")
-    send_keys("^a")
-    time.sleep(0.25)
-    # 审查专项修复：注释和弦必须同一事件串连发（^kc / ^ku）。
-    # 原 "^k" 与 "c" 分两段发送，第二段被当普通字符插入、命令未触发，
-    # 还会把 "c"/"u" 写进正文（E07 四班恒崩实锤）。
-    # v31：和弦改「注释选区」菜单（真人路径，动作用于当前选区；^kc 第二键
-    # 与字符插入时序在焦点漂移下失控，'c#code-line' 实锤）
-    send_keys("^a")
-    time.sleep(0.25)
-    menu_kb("编辑", "注释选区")
-    time.sleep(0.6)
-    marked = editor_clipboard()
-    assert marked.strip().startswith("#"), f"注释未按 Python 标记(#)生效: {marked[:40]!r}"
-    send_keys("^a")
-    time.sleep(0.25)
-    menu_kb("编辑", "取消注释选区")
-    time.sleep(0.6)
-    unmarked = editor_clipboard()
-    assert unmarked.strip() == "code-line", f"取消注释未还原: {unmarked[:40]!r}"
+    marked = comment_op(False, lambda s: s.startswith("#"))
+    assert marked.startswith("#"), f"注释未按 Python 标记(#)生效: {marked[:40]!r}"
+    unmarked = comment_op(True, lambda s: s == "code-line")
+    assert unmarked == "code-line", f"取消注释未还原: {unmarked[:40]!r}"
     shot("case-comment")
 
 
@@ -1350,7 +1346,7 @@ def c_find_panel():
     line2 = copy_current_line().strip()
     assert line2 == "gamma beta", f"查找下一个未到行2: {line2[:40]!r}"
     # v31：反向查找改「搜索>查找上一个」菜单（+F3 后焦点漂移，复制得空实锤）
-    menu_kb("搜索", "查找上一个")
+    menu_xy("搜索", "查找上一个")   # v33：统一纯坐标路径
     time.sleep(0.8)
     send_keys("{ESC}")
     time.sleep(0.4)
@@ -1417,7 +1413,7 @@ def c_find_in_files():
         if shortcut_first:
             send_keys("^+{F}")
         else:
-            menu_kb("搜索", "在文件中查找…")
+            menu_xy("搜索", "在文件中查找…")   # v33：统一纯坐标路径
         time.sleep(1.3)
         if _pixel_changed(img0) > 0.004 or worker_edits_on_win() > 1:
             opened = True
@@ -1530,6 +1526,239 @@ def _click_xy(x, y):
     ctypes.windll.user32.mouse_event(2, 0, 0, 0, 0)
     ctypes.windll.user32.mouse_event(4, 0, 0, 0, 0)
     time.sleep(0.7)
+
+
+# ============ v33：无 UIA 纯坐标菜单驱动（五班实锤收官） ============
+# 机理定谳（v32 班证据回灌）：
+# ① 云 runner UIA 对弹层 hwnd 偶发可用、常发失明（同弹层 V02 命中/V03 MISS；
+#    case-eols 现场命中过一次 Unix(LF) 后 Mac(CR) MISS）——不能作为依赖；
+# ② 顶级固定坐标点击必拉开弹层（b 班 4 次 trace「点开菜单」与兜底点击一一对应，
+#    FAIL-T01/FAIL-V03/case-eols 三张现场截图弹层全部渲染正常）；
+# ③ 弹层几何恒定（三图实测）：一级弹层左缘≈顶级项中心-13、首项中心 y≈窗顶+95.5、
+#    项距≈31.7~32；二级弹层左缘≈一级右缘+3（编码 tc+100 / 查看 tc+105）、
+#    首项中心 y≈父项中心+4、项距≈32；
+# ④ 鼠标菜单后键盘路径不可靠（四班连红）→ 全鼠标；注释和弦由编辑器 KeyDown
+#    原生支持（CodeEditor.cs 2403-2464：Ctrl+K 后 2 秒内第二段带不带 Ctrl 都认）。
+# 弹层项条目序号 = XAML 顺序（分隔线行带按高度过滤，不占序号）。
+
+MENU_INDEX = {
+    "文件": {"新建": 0, "打开…": 1, "最近文件": 2, "保存": 3, "另存为…": 4,
+            "全部保存": 5, "导出": 6, "关闭标签": 7, "退出": 8},
+    "编辑": {"撤销（Ctrl+Z）": 0, "重做（Ctrl+Y）": 1, "剪切（Ctrl+X）": 2,
+            "复制（Ctrl+C）": 3, "粘贴（Ctrl+V）": 4, "全选（Ctrl+A）": 5,
+            "插入时间日期（F5）": 6, "行操作": 7, "大小写转换": 8,
+            "格式化文档（Ctrl+K, Ctrl+D）": 9,
+            "注释选区（Ctrl+K, C）": 10, "取消注释选区（Ctrl+K, U）": 11},
+    "搜索": {"查找": 0, "替换": 1, "在文件中查找…": 2, "查找下一个": 3,
+            "查找上一个": 4, "转到行…": 5},
+    "查看": {"自动换行": 0, "显示行号": 1, "缩放": 2},
+    "编码": {"保存编码": 0, "换行符": 1},
+    "主题": {"水墨": 0, "天青": 1, "墨夜": 2},
+    "工具": {"设置…": 0},
+}
+
+SUB_ITEMS = {
+    ("查看", "缩放"): ["放大", "缩小", "复位"],
+    ("编码", "保存编码"): ["UTF-8", "UTF-8 BOM", "UTF-16 LE", "GBK", "Big5"],
+    ("编码", "换行符"): ["Windows (CRLF)", "Unix (LF)", "Mac (CR)"],
+    ("文件", "导出"): ["导出为可打印 HTML（PDF 用）…"],
+    ("编辑", "行操作"): ["删除当前行（Ctrl+Shift+L）", "复制当前行（Ctrl+D）",
+                    "上移当前行（Alt+↑）", "下移当前行（Alt+↓）"],
+    ("编辑", "大小写转换"): ["转为大写（Ctrl+Shift+U）", "转为小写（Ctrl+U）"],
+}
+
+# 二级弹层左缘相对顶级项中心的偏移（case-eols 实锤：编码 513-413=+100；
+# 查看一级右缘 400=tc+102 → 二级 +105）
+SEC_LEFT_OFF = {("查看", "缩放"): 105, ("编码", "保存编码"): 100, ("编码", "换行符"): 100,
+                ("文件", "导出"): 105, ("编辑", "行操作"): 105, ("编辑", "大小写转换"): 105}
+
+
+def _region_diff(img_a, img_b, box):
+    """绝对矩形两帧差分占比（弹层拉开验证：编辑区静态，caret 闪烁占比可忽略）"""
+    ga = img_a.crop(box).convert("L")
+    gb = img_b.crop(box).convert("L")
+    if ga.size != gb.size:
+        return 0.0
+    da, db = ga.load(), gb.load()
+    W, H = ga.size
+    diff = sum(1 for y in range(0, H, 3) for x in range(0, W, 3) if abs(da[x, y] - db[x, y]) > 12)
+    total = (H // 3 + 1) * (W // 3 + 1)
+    return diff / total
+
+
+def _ink_bands(img, x0, x1, y0, y1, min_h=6, gap=3):
+    """窄条带行带检测：返回 [(中心y绝对, 带高, 墨迹x中心绝对)]。
+    img 传 None 则现抓。抗锯齿断行按 gap 容差合并（v33 修：FAIL-V03 的 207 行
+    曾被 2 行空隙切成 4 段全灭）；高度 < min_h 的分隔线/杂点丢弃；
+    极性自动（水墨亮底/墨夜暗底通吃）。"""
+    if img is None:
+        img = grab_img()
+    W, H = img.size
+    x0, x1 = max(0, int(x0)), min(W, int(x1))
+    y0, y1 = max(0, int(y0)), min(H, int(y1))
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return []
+    g = img.crop((x0, y0, x1, y1)).convert("L")
+    px = g.load()
+    w, h = g.size
+    vals = [px[x, y] for y in range(0, h, 3) for x in range(w)]
+    lo, hi = min(vals), max(vals)
+    if hi - lo < 24:
+        return []
+    thr = (lo + hi) // 2
+    dark = sum(1 for v in vals if v < thr)
+    ink = (lambda v: v < thr) if dark <= len(vals) / 2 else (lambda v: v > thr)
+    segs = []
+    s = None
+    gap_run = 0
+    for y in range(h):
+        cnt = sum(1 for x in range(w) if ink(px[x, y]))
+        if cnt >= 4:
+            if s is None:
+                s = y
+            gap_run = 0
+        elif s is not None:
+            gap_run += 1
+            if gap_run > gap:
+                segs.append((s, y - gap_run))
+                s, gap_run = None, 0
+    if s is not None:
+        segs.append((s, h - 1))
+    out = []
+    for ys, ye in segs:
+        if ye - ys + 1 < min_h:
+            continue
+        ymid = (ys + ye) // 2
+        xsn = [x for x in range(w) if ink(px[x, ymid])]
+        cx = (xsn[0] + xsn[-1]) // 2 if xsn else w // 2
+        out.append((y0 + ymid, ye - ys + 1, x0 + cx))
+    return out
+
+
+def _pick_band(bands, idx, y_exp):
+    """行带序号 + 期望 y 邻域双重校验：序号选带（y 偏差 ≤22 才采信），
+    退而求其次取期望 y ±14 内唯一带；都不中返回 None。"""
+    if idx < len(bands):
+        b = bands[idx]
+        if abs(b[0] - y_exp) <= 22:
+            return b
+    near = [b for b in bands if abs(b[0] - y_exp) <= 14]
+    if len(near) == 1:
+        return near[0]
+    return None
+
+
+def menu_xy(top, item=None, sub=None):
+    """v33：无 UIA 纯坐标菜单驱动。
+    顶级固定坐标点击（trace 实证必拉开）→ 窄条带行带扫描定位目标项
+    （行带序号 = XAML 项序，期望 y 邻域 ±22 双重校验，弹层拉开差分 ≥0.002
+    前置验证）→ 坐标点击；二级弹层同法，首项锚父项实际行带 y+4。
+    任一环失败即 ESC 收场返回 False，用例以自身断言诚实记红。
+    全程零 UIA 调用、零键盘。"""
+    close_panel(verify=False)
+    focus_main()
+    mark = trace_mark()
+    try:
+        import win32gui
+        l, t, _r, _b = win32gui.GetWindowRect(WIN_HANDLE)
+    except Exception:
+        print(f"menu_xy[{top}>{item}>{sub}] 窗口矩形获取失败", flush=True)
+        return False
+    tc = l + TOP_MENU_XY[top][0]
+    pre = grab_img()
+    _click_top_by_layout(top)          # 内部 sleep 0.8
+    post = grab_img()
+    strip = (tc - 8, t + 82, tc + 100, t + 510)   # PIL 顺序 (x0,y0,x1,y1)
+    d = _region_diff(pre, post, strip)
+    bands = _ink_bands(post, strip[0], strip[2], strip[1], strip[3])
+    if d < 0.002 or not bands:
+        time.sleep(0.8)
+        post = grab_img()
+        d = _region_diff(pre, post, strip)
+        bands = _ink_bands(post, strip[0], strip[2], strip[1], strip[3])
+    if d < 0.002 or not bands:
+        print(f"menu_xy[{top}] 弹层未拉开（差分 {d:.5f}，行带 {len(bands)}）", flush=True)
+        shot(f"menuxy-{top}-noflyout")
+        esc_cleanup()
+        trace_since(mark)
+        return False
+    if item is None:
+        trace_since(mark)
+        return True
+    idx = MENU_INDEX.get(top, {}).get(item)
+    if idx is None and top == "语言" and item in LANGS:
+        idx = LANGS.index(item)
+    if idx is None:
+        print(f"menu_xy[{top}>{item}] 无序号映射", flush=True)
+        esc_cleanup()
+        return False
+    y_exp = t + 95.5 + 31.7 * idx
+    band = _pick_band(bands, idx, y_exp)
+    if band is None:
+        band = (int(y_exp), 0, tc + 35)
+        print(f"menu_xy[{top}>{item}] 行带未命中，退固定坐标 y={int(y_exp)}", flush=True)
+    _click_xy(band[2], band[0])
+    if sub is None:
+        esc_cleanup()
+        trace_since(mark)
+        return True
+    time.sleep(0.4)
+    post2 = grab_img()
+    sx = tc + SEC_LEFT_OFF.get((top, item), 105)
+    strip2 = (sx + 4, band[0] - 24, sx + 190, band[0] + 180)   # PIL 顺序
+    d2 = _region_diff(post, post2, strip2)
+    bands2 = _ink_bands(post2, strip2[0], strip2[2], strip2[1], strip2[3])
+    if d2 < 0.002 or not bands2:
+        time.sleep(0.8)
+        post2 = grab_img()
+        d2 = _region_diff(post, post2, strip2)
+        bands2 = _ink_bands(post2, strip2[0], strip2[2], strip2[1], strip2[3])
+    if d2 < 0.002 or not bands2:
+        print(f"menu_xy[{top}>{item}>{sub}] 二级弹层未拉开（差分 {d2:.5f}，行带 {len(bands2)}）", flush=True)
+        shot(f"menuxy-{top}-{item}-nosub")
+        esc_cleanup()
+        trace_since(mark)
+        return False
+    subs = SUB_ITEMS.get((top, item), [])
+    if sub not in subs:
+        print(f"menu_xy[{top}>{item}>{sub}] 无二级序号映射", flush=True)
+        esc_cleanup()
+        return False
+    sidx = subs.index(sub)
+    y_exp2 = band[0] + 4 + 31.7 * sidx
+    band2 = _pick_band(bands2, sidx, y_exp2)
+    if band2 is None:
+        band2 = (int(y_exp2), 0, sx + 78)
+        print(f"menu_xy[{top}>{item}>{sub}] 二级行带未命中，退固定坐标 y={int(y_exp2)}", flush=True)
+    _click_xy(band2[2], band2[0])
+    esc_cleanup()
+    trace_since(mark)
+    return True
+
+
+def chord_ctrl_k(second_vk):
+    """VS 两段式和弦（CodeEditor.cs 2403-2464 实锤）：Ctrl 按住不发 → K 按放 →
+    第二段按放 → Ctrl 抬起。keybd_event 直发，全程 <0.3s 远在 2 秒窗口内；
+    第二段带 Ctrl（源码两种都认）。0x43=C 注释、0x55=U 取消注释。"""
+    for vk, flag in ((0x11, 0), (0x4B, 0), (0x4B, 2), (second_vk, 0), (second_vk, 2), (0x11, 2)):
+        ctypes.windll.user32.keybd_event(vk, 0, flag, 0)
+        time.sleep(0.04)
+    time.sleep(0.6)
+
+
+def comment_op(un, want_ok):
+    """注释/取消注释两段自救：先编辑器和弦（源码原生路径），剪贴板校验不达
+    再退编辑菜单坐标路径。返回最终剪贴板内容，达标与否由调用方断言。"""
+    send_keys("^a")
+    time.sleep(0.25)
+    chord_ctrl_k(0x55 if un else 0x43)
+    got = editor_clipboard().strip()
+    if want_ok(got):
+        return got
+    esc_cleanup()
+    menu_xy("编辑", "取消注释选区（Ctrl+K, U）" if un else "注释选区（Ctrl+K, C）")
+    time.sleep(0.5)
+    return editor_clipboard().strip()
 
 
 def menu_kb(*titles):
@@ -1647,58 +1876,62 @@ def _ink_stats(img, crop=(0.15, 0.25, 0.85, 0.75)):
 
 
 def c_zoom():
-    # v30：不读状态栏缩放百分比。字形行带高度 PIL 量测（墨迹占比作辅助读数）
+    # v33：换思路双修。①动作改 查看→缩放 二级弹层坐标驱动（menu_xy），
+    # 失败退 Ctrl+Add/Subtract/Number0 热键（XAML 加速键实锤）；
+    # ②断言弃 _ink_stats 行带量测（v32 实锤失灵：基线=(191,0.031,2) 两帧全等
+    # 却报不出缩放）——改收层后整幅像素差分：缩放必然重排全部字形渲染，
+    # 放大/缩小/复位前后的差分即为生效实证；复位另须回到基线（差分≈0）。
     click_editor()
     esc_cleanup()
     send_keys("^a{DEL}")
     type_text("\n".join(f"缩放采样行 zoom-probe-{i:02d} HhIi" for i in range(6)))
     time.sleep(0.5)
-    m0 = _ink_stats(grab_img())
-    assert m0, "缩放量测失败：编辑区无墨迹（见截图）"
-    zoom_hotkey(0x6B)          # Ctrl+小键盘加号 = 放大
-    m1 = _ink_stats(grab_img())
-    assert m1, "放大后量测失败"
-    zoom_hotkey(0x6B)
-    m2 = _ink_stats(grab_img())
-    assert m2, "放大第二次量测失败"
-    shot("case-zoom-in")
-    print(f"缩放读数 基线={m0} 放大1={m1} 放大2={m2}", flush=True)
-
-    def _up(a, b):
-        return b[0] > a[0] or (b[0] == a[0] and b[1] > a[1] * 1.05)
-
-    assert _up(m0, m1) and _up(m1, m2), f"放大未生效: 基线={m0} 放大1={m1} 放大2={m2}"
-    zoom_hotkey(0x6D)          # Ctrl+小键盘减号 = 缩小
-    m3 = _ink_stats(grab_img())
-    assert m3, "缩小后量测失败"
-
-    def _down(a, b):
-        return b[0] < a[0] or (b[0] == a[0] and b[1] < a[1] * 0.95)
-
-    assert _down(m2, m3), f"缩小未生效: 放大2={m2} 缩小={m3}"
-    send_keys("^0")
-    time.sleep(0.8)
-    m4 = _ink_stats(grab_img())
-    assert m4, "复位后量测失败"
-    assert abs(m4[0] - m0[0]) <= 1, f"复位未回到基线: 基线={m0} 复位={m4}"
-    shot("case-zoom-reset")
+    base = grab_img()
+    prev = base
+    for label, tag in (("放大", "in1"), ("放大", "in2"), ("缩小", "out"), ("复位", "reset")):
+        ok = menu_xy("查看", "缩放", label)
+        if not ok:
+            vk = {"放大": 0x6B, "缩小": 0x6D, "复位": 0x30}[label]
+            print(f"缩放[{label}] 弹层路径失败，退热键 0x{vk:02X}", flush=True)
+            focus_main()
+            zoom_hotkey(vk)
+        time.sleep(0.6)
+        esc_cleanup()
+        time.sleep(0.3)
+        img = grab_img()
+        d = _pixel_changed(prev, img)
+        prev = img
+        shot(f"case-zoom-{tag}")
+        print(f"缩放[{label}] 差分 {d:.5f}", flush=True)
+        if label != "复位":
+            assert d > 0.004, f"缩放[{label}]画面无变化（差分 {d:.5f}）"
+        else:
+            d_base = _pixel_changed(base, img)
+            assert d > 0.004 and d_base < 0.004, \
+                f"复位未回到基线: 复位差分={d:.5f} 对基线差分={d_base:.5f}"
 
 
 def c_wrap_toggle():
-    # v30：真人路径 + 超长行像素差分断言（换行开关必然改变渲染）
+    # v33：menu_xy 坐标驱动 + 收层后取证。v32 实锤教训：弹层开着差分必然
+    # 巨量（V02 假绿通道——FAIL-V03 现场自动换行仍带勾，证 v32 两次 toggle
+    # 只成了一次），必须 ESC 收层后再抓帧，差分才只反映换行渲染变化。
     click_editor()
     esc_cleanup()
     send_keys("^a{DEL}")
     type_text("wrap-" * 120)
     time.sleep(0.4)
     w0 = grab_img()
-    menu_kb("查看", "自动换行")
+    menu_xy("查看", "自动换行")
     time.sleep(0.6)
+    esc_cleanup()
+    time.sleep(0.3)
     w1 = grab_img()
     shot("case-wrap-on")
     d1 = _pixel_changed(w0, w1)
-    menu_kb("查看", "自动换行")
+    menu_xy("查看", "自动换行")
     time.sleep(0.6)
+    esc_cleanup()
+    time.sleep(0.3)
     w2 = grab_img()
     shot("case-wrap-off")
     d2 = _pixel_changed(w1, w2)
@@ -1707,14 +1940,20 @@ def c_wrap_toggle():
 
 def c_lineno_toggle():
     # v30：真人路径 + 行号栏像素差分断言（左侧带显隐必然改变画面）
+    # v33：menu_xy 坐标驱动 + 收层后取证（查看弹层 x 288-400 落在 crop 内，
+    # 不收层差分会被弹层开合污染——V02 假绿同款通道）。
     a0 = grab_img()
-    menu_kb("查看", "显示行号")
+    menu_xy("查看", "显示行号")
     time.sleep(0.6)
+    esc_cleanup()
+    time.sleep(0.3)
     a1 = grab_img()
     shot("case-lineno-off")
     d1 = _pixel_changed(a0, a1, crop=(0.0, 0.12, 0.30, 0.85))
-    menu_kb("查看", "显示行号")
+    menu_xy("查看", "显示行号")
     time.sleep(0.6)
+    esc_cleanup()
+    time.sleep(0.3)
     a2 = grab_img()
     shot("case-lineno-on")
     d2 = _pixel_changed(a1, a2, crop=(0.0, 0.12, 0.30, 0.85))
@@ -1730,12 +1969,18 @@ THEMES = ["水墨", "天青", "墨夜"]
 def c_themes():
     # v31：先打底天青——水墨是默认主题，从水墨切水墨必然无变化
     #（43592341121 实锤 diff=0.00043 假红并连锁拖瘫后续菜单点击）
-    menu_kb("主题", "天青")
+    # v33：menu_xy 坐标驱动 + 收层后取证（主题弹层开合本身就会造成全幅差分，
+    # 不收层无法证明是换主题导致的变色）。
+    menu_xy("主题", "天青")
     time.sleep(1.0)
+    esc_cleanup()
+    time.sleep(0.3)
     prev = grab_img()
     for i, t in enumerate(THEMES):
-        menu_kb("主题", t)
+        menu_xy("主题", t)
         time.sleep(1.0)
+        esc_cleanup()
+        time.sleep(0.3)
         cur = grab_img()
         d = _pixel_changed(prev, cur, crop=(0.0, 0.0, 1.0, 1.0))
         prev = cur
@@ -1755,7 +2000,7 @@ def c_encodings():
     send_keys("^a{DEL}")
     type_text("save-me-文")   # 「文」GBK/Big5 双码表可编（内 是简体字，Big5 编不了）
     for i, enc in enumerate(ENCS):
-        menu_kb("编码", "保存编码", enc)
+        menu_xy("编码", "保存编码", enc)
         time.sleep(0.4)
         focus_main()
         send_keys("^s")
@@ -1805,7 +2050,7 @@ def c_eols():
     found = []
     for title, token in EOLS:
         want = EOL_WANT[token]
-        menu_kb("编码", "换行符", title)
+        menu_xy("编码", "换行符", title)
         time.sleep(0.4)
         focus_main()
         send_keys("^s")
@@ -1850,35 +2095,31 @@ LANG_MARK = {
 
 
 def c_languages():
-    # v30：不读状态栏。逐语言「注释→剪贴板比对标记→取消注释还原」，
+    # v33：语言切换 menu_xy 坐标驱动（LANGS 序 = LangDef.All 序，源码实锤）；
+    # 注释走 comment_op 两段自救（和弦优先、编辑菜单坐标兜底）。
+    # 逐语言「注释→剪贴板比对标记→取消注释还原」，
     # 语法语言切换以注释标记实际生效为实证（源码揪清单口径）。
     click_editor()
     esc_cleanup()
     send_keys("^a{DEL}")
     for lang in LANGS:
-        menu_kb("语言", lang)
+        menu_xy("语言", lang)
         time.sleep(0.5)
         click_editor()
         send_keys("^a{DEL}")
         type_text("code-line")
-        send_keys("^a")
-        time.sleep(0.25)
-        menu_kb("编辑", "注释选区")
-        time.sleep(0.6)
-        marked = editor_clipboard().strip()
         want = LANG_MARK[lang]
         if want is None:
+            marked = comment_op(False, lambda s: s == "code-line")
             assert marked == "code-line", f"[{lang}] 无注释语法语言被加注释: {marked[:40]!r}"
         elif want == "xml":
+            marked = comment_op(False, lambda s: s.startswith("<!--") and s.endswith("-->"))
             assert marked.startswith("<!--") and marked.endswith("-->"), \
                 f"[{lang}] XML 包裹注释未生效: {marked[:48]!r}"
         else:
+            marked = comment_op(False, lambda s: s.startswith(want))
             assert marked.startswith(want), f"[{lang}] 注释标记[{want}]未生效: {marked[:40]!r}"
-        send_keys("^a")
-        time.sleep(0.25)
-        menu_kb("编辑", "取消注释选区")
-        time.sleep(0.6)
-        restored = editor_clipboard().strip()
+        restored = comment_op(True, lambda s: s == "code-line")
         assert restored == "code-line", f"[{lang}] 取消注释未还原: {restored[:40]!r}"
     shot("case-languages")
 
@@ -1954,13 +2195,13 @@ def c_export_html():
     p = os.path.join(DOCS, "taopad-export2.html")
     if os.path.exists(p):
         os.remove(p)
-    menu_kb("文件", "导出", "导出为可打印 HTML（PDF 用）…")
+    menu_xy("文件", "导出", "导出为可打印 HTML（PDF 用）…")   # v33：统一纯坐标路径
     time.sleep(0.6)
     if not dialog_present():
         # 菜单没弹/路径进了编辑区：ESC 后整重试一次
         send_keys("{ESC}")
         time.sleep(0.4)
-        menu_kb("文件", "导出", "导出为可打印 HTML（PDF 用）…")
+        menu_xy("文件", "导出", "导出为可打印 HTML（PDF 用）…")
         time.sleep(0.6)
     picker_typing(p)
     time.sleep(1.2)
@@ -2008,7 +2249,7 @@ def c_settings():
     # v30：真人路径 + trace.log 断言（「设置：入口/已确认」为应用真实事件回执）。
     # 定谳：此前 menu() 未弹时 SPACE/ENTER 落编辑区（O08b 残留 'S' 实锤）= 假绿。
     mark = trace_mark()
-    menu_kb("工具", "设置…")
+    menu_xy("工具", "设置…")   # v33：统一纯坐标路径
     time.sleep(1.3)
     shot("case-settings-dialog")
     send_keys("{SPACE}")     # 焦点默认落在第一个开关（自动换行），空格切换
@@ -2030,10 +2271,10 @@ def c_settings():
 
 
 def c_mouse_menu():
-    """v32：与 menu_kb 同为全鼠标路径（键序路径四班连红已废弃）。保留本用例
-    双重价值：①鼠标菜单建新标签；②交互后 UIA 读层存活探针（软件侧待查缺陷：
-    鼠标菜单交互拖瘫 UIA Text 供给，多班实锤）。先落已知标记内容再开菜单——
-    导航失败时残留可辨、可整轮重试。"""
+    """v33：与 menu_xy 同为纯坐标路径（UIA menu_hit 偶发可用不可依赖，
+    五班实锤）。保留本用例双重价值：①鼠标坐标路径建新标签；②交互后 UIA
+    读层存活探针（软件侧待查缺陷：菜单交互影响 UIA Text 供给，多班实锤）。
+    先落已知标记内容再开菜单——导航失败时残留可辨、可整轮重试。"""
     close_panel()
     ok = False
     got = ""
@@ -2041,17 +2282,9 @@ def c_mouse_menu():
         click_editor()
         send_keys("^a{DEL}")
         type_text("pre-menu-marker")
-        opened = worker_click_menu("文件") or _click_top_by_layout("文件")
-        if not opened:
-            send_keys("{ESC}")
-            time.sleep(0.5)
-            continue
-        time.sleep(1.0)
-        pos = worker_menu_hit("新建", wait=6.0)
-        if pos is None:
+        if not menu_xy("文件", "新建"):
             esc_cleanup()
             continue
-        _click_xy(*pos)
         time.sleep(1.2)
         if not dialog_present():
             click_editor()
@@ -2072,7 +2305,11 @@ def c_mouse_menu():
 
 
 def c_exit():
-    # v30：菜单改真人路径（menu_kb），退出等待放宽到 20 秒
+    # v33：退出主路径改 WM_CLOSE 直投主窗（App.xaml.cs 实锤闭环：
+    # MainWindow.Closed → UntrackWindow → 空窗 ExitAll → Current.Exit +
+    # 1s Environment.Exit(0) 兜底；X 按钮同通道）。v32 五班实锤菜单项
+    # 定位不可靠导致进程永驻。8 秒仍活退 menu_xy 文件→退出 坐标兜底；
+    # 保存/退出确认框回车默认确认不变。
     wer_before = wer_count()
     close_panel()
     focus_main()
@@ -2083,15 +2320,25 @@ def c_exit():
         picker_typing(os.path.join(DOCS, "taopad-exit-save.txt"))
         time.sleep(0.8)
     mark = trace_mark()
-    menu_kb("文件", "退出")
+    try:
+        import win32gui
+        import win32con
+        win32gui.PostMessage(WIN_HANDLE, win32con.WM_CLOSE, 0, 0)
+        print(f"WM_CLOSE 已投递 hwnd={WIN_HANDLE}", flush=True)
+    except Exception as e:
+        print(f"WM_CLOSE 投递失败: {e}", flush=True)
     still = True
     t0 = time.time()
+    menu_tried = False
     while still and time.time() - t0 < 20:
         out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq TaoPad.exe"], capture_output=True, text=True)
         still = "TaoPad.exe" in out.stdout
         if still:
             if dialog_present():  # 保存/退出确认框：回车默认确认
                 send_keys("{ENTER}")
+            if not menu_tried and time.time() - t0 > 8:
+                menu_xy("文件", "退出")
+                menu_tried = True
             time.sleep(1.0)
     trace_since(mark)
     assert not still, "退出后进程仍在（等待20秒）"

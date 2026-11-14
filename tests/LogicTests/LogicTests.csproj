@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- R1 重建：v1.7.0 测试报告载明 41 项逻辑回归，资产在 v1.9.12 源码树中丢失。
+       本工程为纯逻辑回归（net8.0 控制台），只编译零 WinUI 依赖的五个逻辑文件，
+       沙箱与云上均可运行；此后修坑必带回归断言（审查台账 R1 处置）。 -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>LogicTests</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <NoWarn>CS8600;CS8601;CS8602;CS8603;CS8604;CS8618;CS8619;CS8620;CS8625;CS8629</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../src/AntPad/Syntax/Tokenizer.cs" />
+    <Compile Include="../../src/AntPad/Syntax/CommentCommands.cs" />
+    <Compile Include="../../src/AntPad/Services/CodeFormatter.cs" />
+    <Compile Include="../../src/AntPad/Services/CompletionEngine.cs" />
+    <Compile Include="../../src/AntPad/Services/EncodingHelper.cs" />
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+
+</Project>
