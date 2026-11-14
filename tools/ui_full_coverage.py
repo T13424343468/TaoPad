@@ -141,7 +141,9 @@ def rawwalk_texts(h):
         # v27：子窗桥直连仍摸不到正文（RAWWALK nodes=4 实锤）——改从桌面根全树 DFS，
         # 按 ProcessId 过滤出本进程的全部元素（inspect.exe 等价视角，不依赖 hwnd 归属）
         try:
-            _pid = ctypes.windll.user32.GetWindowThreadProcessId(int(h), None)
+            _pidbuf = ctypes.c_uint()
+            ctypes.windll.user32.GetWindowThreadProcessId(int(h), ctypes.byref(_pidbuf))
+            _pid = _pidbuf.value  # v28：第二参才是 PID 出参，返回值是线程号（v27 班实锤全树零命中）
             stack_pid = [iuia.GetRootElement()]
             seen_pid = 0
             pid_names = []
