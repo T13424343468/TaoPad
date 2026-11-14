@@ -32,6 +32,7 @@ ALT 会把菜单栏置为"菜单模式"，随后的 F10 被当成关闭菜单，
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -497,8 +498,12 @@ def flush_report():
         print("flush_report失败", e, flush=True)
 
 def record(name, ok, detail=""):
-    RESULTS.append({"case": name, "result": "PASS" if ok else "FAIL", "detail": detail})
-    print(("[PASS] " if ok else "[FAIL] ") + name + (("  --  " + detail) if detail else ""), flush=True)
+    if ok in ("PASS", "FAIL", "SKIP"):
+        result = ok
+    else:
+        result = "PASS" if ok else "FAIL"
+    RESULTS.append({"case": name, "result": result, "detail": detail})
+    print(f"[{result}] " + name + (("  --  " + detail) if detail else ""), flush=True)
     flush_report()
 
 
@@ -512,8 +517,71 @@ def refocus_app():
     except Exception:
         pass
 
+def app_alive():
+    """应用进程存活探针：TaoPad.exe 不在进程表 = 本班已崩，余下用例不空跑。"""
+    try:
+        out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"],
+                             capture_output=True, text=True, timeout=60).stdout
+        return any("TaoPad.exe" in l for l in out.splitlines())
+    except Exception:
+        return True   # 探针失败不误判崩
+
+
+def collect_crash_scene():
+    """崩溃现场取证：crash/trace 日志、LocalDumps 转储、WER 报告、应用事件日志
+    全部落 ui-evidence/crash-scene/，随证据包上传。五班 E07 恒崩却零现场，
+    根因无法定位的缺口就是这一步。"""
+    try:
+        dest = os.path.join(EVID, "crash-scene")
+        os.makedirs(dest, exist_ok=True)
+        local = os.environ.get("LOCALAPPDATA", "")
+        roots = [os.path.join(local, "TaoPad"),
+                 r"D:\TaoPadData\TaoPad",
+                 os.path.join(local, r"Microsoft\Windows\WER"),
+                 os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), r"Microsoft\Windows\WER")]
+        for root in roots:
+            if not os.path.isdir(root):
+                continue
+            for dirpath, _dirs, files in os.walk(root):
+                if not ("TaoPad" in dirpath or any("TaoPad" in f for f in files)):
+                    continue
+                rel = re.sub(r"[^0-9A-Za-z_.-]", "_", os.path.relpath(dirpath, root))
+                tgt = os.path.join(dest, rel)
+                os.makedirs(tgt, exist_ok=True)
+                for f in files:
+                    try:
+                        shutil.copy2(os.path.join(dirpath, f), os.path.join(tgt, f))
+                    except Exception:
+                        pass
+        # 应用事件日志近 2 小时 TaoPad 相关条目（.NET Runtime/Windows Error Reporting 崩溃都在这里）
+        try:
+            ps = ("Get-WinEvent -FilterHashtable @{LogName='Application';StartTime=(Get-Date).AddHours(-2)} "
+                  "-ErrorAction SilentlyContinue | "
+                  "Where-Object { $_.Message -match 'TaoPad' -or $_.ProviderName -match 'TaoPad' } | "
+                  "Format-List TimeCreated,ProviderName,Id,LevelDisplayName,Message | Out-String -Width 400")
+            out = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                                 capture_output=True, text=True, timeout=120)
+            with open(os.path.join(dest, "application-events.txt"), "w", encoding="utf-8") as f:
+                f.write(out.stdout or out.stderr or "")
+        except Exception as e:
+            print("事件日志收集失败", e, flush=True)
+        print("崩溃现场已收集到", dest, flush=True)
+    except Exception as e:
+        print("崩溃现场收集失败", e, flush=True)
+
+
+DEAD_MARKED = False
+
 def case(name, fn):
+    global DEAD_MARKED
     mem_probe(name)
+    if not app_alive():
+        if not DEAD_MARKED:
+            DEAD_MARKED = True
+            collect_crash_scene()
+            shot("CRASH-scene-desktop")
+        record(name, "SKIP", "应用进程已消失，跳过余下用例（崩溃现场已收集到 crash-scene/）")
+        return
     refocus_app()
     try:
         fn()
@@ -521,6 +589,10 @@ def case(name, fn):
     except Exception as e:
         record(name, False, f"[{type(e).__name__}] {str(e)[:280]}")
         shot("FAIL-" + re.sub(r"[^0-9A-Za-z_-]", "_", name))
+        if not app_alive():   # 用例失败后进程也没了：立即抓崩溃现场
+            DEAD_MARKED = True
+            collect_crash_scene()
+            shot("CRASH-scene-desktop")
 
 
 def find_exe():
