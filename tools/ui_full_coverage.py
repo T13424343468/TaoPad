@@ -125,16 +125,18 @@ def rawwalk_texts(h):
         handles = [int(h)]
         try:
             from ctypes import wintypes as _wt
+            _cb = ctypes.WINFUNCTYPE(_wt.LPARAM, _wt.HWND, _wt.LPARAM)
             kids = []
-            _cb = ctypes.WINFUNCTYPE(_wt.BOOL, _wt.HWND, _wt.LPARAM)
             def _enum(hc, _lp):
                 kids.append(hc)
-                return True
-            ctypes.windll.user32.EnumChildWindows(int(h), _cb, 0)
+                return 1
+            _EnumChildWindows = ctypes.windll.user32.EnumChildWindows
+            _EnumChildWindows.argtypes = (_wt.HWND, _cb, _wt.LPARAM)
+            _EnumChildWindows(wintypes.HWND(h), _cb, 0)
             handles.extend(kids[:20])
             print("RAWWALK2", f"children={len(kids)}", flush=True)
         except Exception as _e:
-            print("RAWWALK2 child-enum ERR", type(_e).__name__, flush=True)
+            print("RAWWALK2 child-enum ERR", type(_e).__name__, _e, flush=True)
         stack = []
         seen = 0
         for hcur in handles:
