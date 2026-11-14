@@ -53,6 +53,7 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
     public MainWindow()
     {
         InitializeComponent();
+        ExposeMenuToUia();
         Title = "TaoPad";
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
@@ -936,6 +937,46 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
 
     /// <summary>界面展示用版本号；与安装包文件名保持一致。</summary>
     public const string AppVersion = "1.0.10";
+
+    /// <summary>
+    /// UIA 供给修复（2026-11-14 定谳班：云端 UIA 对菜单/状态栏空返）。
+    /// WinUI3 的 MenuFlyoutItem 文本不总是传播到自动化 Name，菜单项在
+    /// 控制视图中偶发空名导致枚举 MISS；显式补 AutomationProperties.Name
+    /// 与 Content 视图，保证外部 UIA 客户端（含测试 harness）稳定枚举。
+    /// 不改变任何交互行为，零功能影响。
+    /// </summary>
+    void ExposeMenuToUia()
+    {
+        try
+        {
+            foreach (var bar in MenuBarRoot.Items)
+            {
+                AutomationProperties.SetName(bar, bar.Title);
+                ExposeFlyoutItems(bar.Items);
+            }
+        }
+        catch { /* 供给修复失败不阻断启动，保持原行为 */ }
+    }
+
+    void ExposeFlyoutItems(MenuFlyout flyout)
+    {
+        foreach (var item in flyout.Items)
+        {
+            switch (item)
+            {
+                case MenuFlyoutItem mfi:
+                    AutomationProperties.SetName(mfi, mfi.Text);
+                    break;
+                case ToggleMenuFlyoutItem tmi:
+                    AutomationProperties.SetName(tmi, tmi.Text);
+                    break;
+                case MenuFlyoutSubItem sub:
+                    AutomationProperties.SetName(sub, sub.Text);
+                    ExposeFlyoutItems(sub.Items);
+                    break;
+            }
+        }
+    }
 
     void UpdateStatus()
     {

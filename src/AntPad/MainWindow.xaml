@@ -22,7 +22,7 @@
     </Grid>
 
     <!-- 菜单栏 -->
-    <MenuBar Grid.Row="1">
+    <MenuBar x:Name="MenuBarRoot" Grid.Row="1">
       <MenuBarItem Title="文件" Tapped="OnMenuTapped" PointerPressed="OnMenuPressed">
         <MenuFlyoutItem Text="新建" Click="OnNew">
           <MenuFlyoutItem.KeyboardAccelerators>
@@ -208,14 +208,22 @@
     <Border x:Name="StatusBar" Grid.Row="3" Padding="14,5" BorderThickness="0,1,0,0"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
       <StackPanel Orientation="Horizontal" Spacing="18">
-        <TextBlock x:Name="PosText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-        <TextBlock x:Name="SelText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-        <TextBlock x:Name="LenText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-        <TextBlock x:Name="LinesText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-        <TextBlock x:Name="ZoomText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-        <TextBlock x:Name="EncText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-        <TextBlock x:Name="EolText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-        <TextBlock x:Name="LangText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+        <TextBlock x:Name="PosText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                   AutomationProperties.AccessibilityView="Content"/>
+        <TextBlock x:Name="SelText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                   AutomationProperties.AccessibilityView="Content"/>
+        <TextBlock x:Name="LenText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                   AutomationProperties.AccessibilityView="Content"/>
+        <TextBlock x:Name="LinesText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                   AutomationProperties.AccessibilityView="Content"/>
+        <TextBlock x:Name="ZoomText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                   AutomationProperties.AccessibilityView="Content"/>
+        <TextBlock x:Name="EncText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                   AutomationProperties.AccessibilityView="Content"/>
+        <TextBlock x:Name="EolText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                   AutomationProperties.AccessibilityView="Content"/>
+        <TextBlock x:Name="LangText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                   AutomationProperties.AccessibilityView="Content"/>
       </StackPanel>
     </Border>
   </Grid>

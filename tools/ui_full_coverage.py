@@ -291,7 +291,7 @@ def worker_main(argv):
                 for idx, tname in enumerate(titles):
                     target = None
                     for attempt in range(3):   # v17：枚举不到先清浮层再重试
-                        scopes = [win2] if idx == 0 else same_pid()
+                        scopes = [win2] + (same_pid() if idx == 0 else [])   # v19：顶级项也扫同进程窗口（父浮层未收起时菜单栏可能挂在弹层）
                         for scope in scopes:
                             try:
                                 for d in scope.descendants(control_type="MenuItem"):
@@ -323,6 +323,19 @@ def worker_main(argv):
                                 break
                             except Exception:
                                 continue
+                        if not ok:
+                            # v19（43554708080 实锤 NOINVOKE:Python）：UIA 动作链全失败时
+                            # 用元素真实矩形做鼠标点击兜底（无键盘、无误触退出风险）
+                            try:
+                                r = target.rectangle()
+                                x = (r.left + r.right) // 2
+                                y = (r.top + r.bottom) // 2
+                                ctypes.windll.user32.SetCursorPos(x, y)
+                                ctypes.windll.user32.mouse_event(2, 0, 0, 0, 0)
+                                ctypes.windll.user32.mouse_event(4, 0, 0, 0, 0)
+                                ok = True
+                            except Exception:
+                                ok = False
                         found = "OK" if ok else f"NOINVOKE:{tname}"
                     else:
                         ok2 = False
