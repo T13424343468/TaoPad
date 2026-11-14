@@ -1008,7 +1008,11 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
     async void OnSaveAs(object sender, RoutedEventArgs e) { if (Active is { } d) await SaveDocAsync(d, true); }
     async void OnSaveAll(object sender, RoutedEventArgs e) { foreach (var d in _docs.ToList()) if (d.Dirty) await SaveDocAsync(d, false); }
     void OnCloseTab(object sender, RoutedEventArgs e) { if (Active is { } d) _ = CloseDocAsync(d); }
-    void OnExit(object sender, RoutedEventArgs e) => Close();
+    void OnExit(object sender, RoutedEventArgs e)
+    {
+        try { Services.TraceLog.Write("菜单「退出」项被点击——本次退出为用户/自动化主动触发"); } catch { }
+        Close();
+    }
 
     void OnAddTab(object sender, object e) => NewDoc();
     void OnTabClose(TabView sender, TabViewTabCloseRequestedEventArgs args)
