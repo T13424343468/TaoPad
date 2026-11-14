@@ -248,12 +248,39 @@ jobs:
           $p = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "静默安装失败，退出码 $($p.ExitCode)" }
 
+      - name: 启用崩溃转储抓取（崩溃后系统自动落 dump）
+        shell: pwsh
+        run: |
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\TaoPad.exe" /v DumpFolder /t REG_EXPAND_SZ /d "$env:LOCALAPPDATA\TaoPad\dumps" /f
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\TaoPad.exe" /v DumpType /t REG_DWORD /d 2 /f
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\TaoPad.exe" /v DumpCount /t REG_DWORD /d 3 /f
+          Write-Host "LocalDumps for TaoPad.exe enabled (full dumps)"
+
       - name: 界面自动化半场 A（独立会话，单场控制在 57 分钟墙内）
         shell: pwsh
         run: |
           python -m pip install --quiet --disable-pip-version-check pywinauto pillow pyperclip
           $env:PYTHONIOENCODING='utf-8'
           python tools/ui_full_coverage.py A
+
+      - name: 收集崩溃现场（日志/dump/WER/事件日志）
+        if: always()
+        shell: pwsh
+        run: |
+          $out = "ui-evidence/crash-scene"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          foreach ($root in @("$env:LOCALAPPDATA\TaoPad", "D:\TaoPadData\TaoPad", "$env:LOCALAPPDATA\Microsoft\Windows\WER", "$env:ProgramData\Microsoft\Windows\WER")) {
+            if (Test-Path $root) {
+              Get-ChildItem $root -Recurse -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match 'TaoPad' } |
+                Copy-Item -Destination $out -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+          Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddHours(-2)} -ErrorAction SilentlyContinue |
+            Where-Object { $_.Message -match 'TaoPad' -or $_.ProviderName -match 'TaoPad' } |
+            Format-List TimeCreated, ProviderName, Id, LevelDisplayName, Message |
+            Out-File "$out\application-events.txt" -Encoding utf8 -Width 400
+          Write-Host "崩溃现场收集完成：$out"
 
       - name: 上传界面自动化证据（A 场）
         if: always()
@@ -296,12 +323,39 @@ jobs:
           $p = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "静默安装失败，退出码 $($p.ExitCode)" }
 
+      - name: 启用崩溃转储抓取（崩溃后系统自动落 dump）
+        shell: pwsh
+        run: |
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\TaoPad.exe" /v DumpFolder /t REG_EXPAND_SZ /d "$env:LOCALAPPDATA\TaoPad\dumps" /f
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\TaoPad.exe" /v DumpType /t REG_DWORD /d 2 /f
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\TaoPad.exe" /v DumpCount /t REG_DWORD /d 3 /f
+          Write-Host "LocalDumps for TaoPad.exe enabled (full dumps)"
+
       - name: 界面自动化半场 B（独立会话，单场控制在 57 分钟墙内）
         shell: pwsh
         run: |
           python -m pip install --quiet --disable-pip-version-check pywinauto pillow pyperclip
           $env:PYTHONIOENCODING='utf-8'
           python tools/ui_full_coverage.py B
+
+      - name: 收集崩溃现场（日志/dump/WER/事件日志）
+        if: always()
+        shell: pwsh
+        run: |
+          $out = "ui-evidence/crash-scene"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          foreach ($root in @("$env:LOCALAPPDATA\TaoPad", "D:\TaoPadData\TaoPad", "$env:LOCALAPPDATA\Microsoft\Windows\WER", "$env:ProgramData\Microsoft\Windows\WER")) {
+            if (Test-Path $root) {
+              Get-ChildItem $root -Recurse -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match 'TaoPad' } |
+                Copy-Item -Destination $out -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+          Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddHours(-2)} -ErrorAction SilentlyContinue |
+            Where-Object { $_.Message -match 'TaoPad' -or $_.ProviderName -match 'TaoPad' } |
+            Format-List TimeCreated, ProviderName, Id, LevelDisplayName, Message |
+            Out-File "$out\application-events.txt" -Encoding utf8 -Width 400
+          Write-Host "崩溃现场收集完成：$out"
 
       - name: 上传界面自动化证据（B 场）
         if: always()
