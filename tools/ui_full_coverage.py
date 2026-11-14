@@ -314,13 +314,13 @@ def worker_main(argv):
                     if idx == len(titles) - 1:
                         ok = False
                         try:
-                            target.select()
+                            target.invoke()
                             ok = True
                         except Exception:
                             pass
                         if not ok:
                             try:
-                                target.invoke()
+                                target.select()
                                 ok = True
                             except Exception:
                                 pass
@@ -332,12 +332,22 @@ def worker_main(argv):
                                 pass
                         found = "OK" if ok else f"NOINVOKE:{tname}"
                     else:
+                        ok2 = False
                         try:
-                            target.select()
-                            time.sleep(0.8)
+                            target.invoke()
+                            ok2 = True
                         except Exception:
+                            pass
+                        if not ok2:
+                            try:
+                                target.select()
+                                ok2 = True
+                            except Exception:
+                                pass
+                        if not ok2:
                             found = f"NOEXPAND:{tname}"
                             break
+                        time.sleep(0.8)
             except Exception as e:
                 found = f"ERR:{type(e).__name__}"
             if not found.startswith(("OK", "ERR:none")):
