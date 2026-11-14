@@ -279,6 +279,23 @@ def worker_main(argv):
                             break
                     except Exception:
                         names = []
+            if not names:
+                # v20 空读诊断：顶层窗口普查 + 主窗原始后代计数——定位死树范围
+                try:
+                    _census = []
+                    for _w in Desktop(backend="uia").windows():
+                        try:
+                            _census.append(f"h={_w.handle},pid={_w.process_id()},t={(_w.window_text() or '')[:24]!r}")
+                        except Exception:
+                            _census.append("<enum-err>")
+                    print("CENSUS", " | ".join(_census) if _census else "<desktop-empty>", flush=True)
+                    try:
+                        _raw = len(win.descendants()) if win is not None else -1
+                    except Exception as _e:
+                        _raw = f"ERR:{type(_e).__name__}"
+                    print(f"RAWDESC {_raw}", flush=True)
+                except Exception as _e:
+                    print(f"CENSUS-ERR {type(_e).__name__}", flush=True)
             print("TEXTS", json.dumps(names, ensure_ascii=False))
         elif mode == "menu_item_visible":
             found = False
@@ -807,9 +824,10 @@ def menu(*titles):
     # v19：无论成败，确定性收净 MenuBar 弹出层——r19 实锤悬空下拉导致主窗
     # UIA 读层整树返空、后续用例连锁全挂。收层后再读状态栏与下一个用例才可靠。
     try:
-        close_menus_uia()
-    except Exception:
-        pass
+        _cm = close_menus_uia()
+        print(f"菜单收层回执: {_cm!r}", flush=True)   # v20：回执显式可见，收层成效可判
+    except Exception as _e:
+        print(f"菜单收层异常: {type(_e).__name__}", flush=True)
     if ok:
         print(f"读层存活: {read_alive()}", flush=True)
         if dialog_present():
