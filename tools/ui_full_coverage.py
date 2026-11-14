@@ -117,14 +117,32 @@ def rawwalk_texts(h):
         import comtypes
         import pywinauto.uia_defines  # noqa: F401  确保 UIAutomationClient 类型库就绪
         from comtypes.gen.UIAutomationClient import CUIAutomation, IUIAutomation
-        import win32gui  # noqa
         comtypes.CoInitializeEx()
         iuia = comtypes.client.CreateObject(CUIAutomation(), interface=IUIAutomation)
-        root = iuia.ElementFromHandle(int(h))
         walker = iuia.RawViewWalker
-        stack = [root]
+        # v25：UIA 树不跨 hwnd——主窗根下正文全盲（RAWWALK nodes=1 实锤），
+        # 必须把 DesktopChildSiteBridge 等子 hwnd 也当根逐个进树
+        handles = [int(h)]
+        try:
+            from ctypes import wintypes as _wt
+            kids = []
+            _cb = ctypes.WINFUNCTYPE(_wt.BOOL, _wt.HWND, _wt.LPARAM)
+            def _enum(hc, _lp):
+                kids.append(hc)
+                return True
+            ctypes.windll.user32.EnumChildWindows(int(h), _cb, 0)
+            handles.extend(kids[:20])
+            print("RAWWALK2", f"children={len(kids)}", flush=True)
+        except Exception as _e:
+            print("RAWWALK2 child-enum ERR", type(_e).__name__, flush=True)
+        stack = []
         seen = 0
-        while stack and seen < 4000:
+        for hcur in handles:
+            try:
+                stack.append(iuia.ElementFromHandle(hcur))
+            except Exception:
+                continue
+        while stack and seen < 6000:
             cur = stack.pop()
             seen += 1
             try:
