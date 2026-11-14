@@ -1,4 +1,4 @@
-// R1 重建：TaoPad 纯逻辑回归（对应 docs/05-TEST_REPORT.md v1.7.0 第 2 节 41 项口径，
+﻿// R1 重建：TaoPad 纯逻辑回归（对应 docs/05-TEST_REPORT.md v1.7.0 第 2 节 41 项口径，
 // 按现源码 API 重建并扩展到 46 断言；审查台账 20261114-甲班 R1 处置）。
 // 运行：dotnet run --project tests/LogicTests ；失败退出码 1，云测/修红班可直接挂闸。
 using System.Text;
