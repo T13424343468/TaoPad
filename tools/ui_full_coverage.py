@@ -1366,7 +1366,7 @@ def c_find_panel():
     line2 = copy_current_line().strip()
     assert line2 == "gamma beta", f"查找下一个未到行2: {line2[:40]!r}"
     # v31：反向查找改「搜索>查找上一个」菜单（+F3 后焦点漂移，复制得空实锤）
-    menu_xy("搜索", "查找上一个")   # v33：统一纯坐标路径
+    menu_xy("搜索", "查找上一个", keep_open=True)   # v36：用例自收面板
     time.sleep(0.8)
     send_keys("{ESC}")
     time.sleep(0.4)
@@ -1433,7 +1433,7 @@ def c_find_in_files():
         if shortcut_first:
             send_keys("^+{F}")
         else:
-            menu_xy("搜索", "在文件中查找…")   # v33：统一纯坐标路径
+            menu_xy("搜索", "在文件中查找…", keep_open=True)   # v36：对话框别收
         time.sleep(1.3)
         if _pixel_changed(img0) > 0.004 or worker_edits_on_win() > 1:
             opened = True
@@ -1708,33 +1708,52 @@ def _pick_band(bands, idx, y_exp):
     return None
 
 
-def menu_xy(top, item=None, sub=None):
-    """v35：全键盘菜单驱动（O05 最近文件用例唯一云上实证通道）。
+def _trace_lines(mark):
+    """静默读 trace.log 自 mark 行后的新增行（回执判定用，不打印）。"""
+    for p_ in TRACE_PATHS:
+        try:
+            with open(p_, encoding="utf-8", errors="replace") as f:
+                return [l.rstrip("\r\n") for l in f.readlines()[mark:]]
+        except OSError:
+            continue
+    return []
 
-    十轮实锤定谳（43649051295 / 43716470756 双轮日志+截图）：
-    - 云端会话合成鼠标点击：顶级 MenuBarItem 吃得到（程序 trace「点开菜单」
-      全程在记），但一级弹层项点击从不激活——二级弹层差分恒 0.00000
-      （编码/查看/主题/文件>导出 全灭）；v33 首轮偶中、v34 全灭；
-    - v34 的 SendInput 分离式+悬停前置验证与双 ESC+点击编辑区收层，实测
-      比 v33 基线更差（V02 on段 0.056→0.0038，C01 连文件都存不出来），
-      按修红升级线整体回滚；
-    - 唯一全程吃得开的是 c_recent_menu 的键盘菜单序：F10 聚焦菜单条 →
-      RIGHT 移顶级项 → ENTER 开弹层 → DOWN 逐项 → ENTER 激活。
 
-    v35 流程：esc 清场 → F10 → RIGHT×k → ENTER 开弹层（strip 差分前置
-    验证，未开退回鼠标顶级点击重试）→ DOWN×idx →（有二级：RIGHT 展开，
-    二级差分验证）→ DOWN×sidx → ENTER 激活。激活后弹层自关，收尾单 ESC。
-    行序号沿用 MENU_INDEX / SUB_ITEMS（分隔线不占序号，与键盘导航一致）。
-    用例以自身断言诚实记红，本函数失败返回 False。"""
+def _trace_wait_item(mark, text, wait=2.5, poll=0.35):
+    """v36：等待 trace 出现「菜单项：{text}」回执（app v35 挂接的 Click 真值，
+    快捷键经 KeyboardAccelerator 触发 Click 同样在记）。命中即回。"""
+    t0 = time.time()
+    while time.time() - t0 < wait:
+        if any(f"菜单项：{text}" in l for l in _trace_lines(mark)):
+            return True
+        time.sleep(poll)
+    return False
+
+
+def menu_xy(top, item=None, sub=None, keep_open=False):
+    """v36：鼠标顶级 + 弹层内键盘导航 + trace 回执闭环验证。
+
+    v35 定谳（run 43718737382 证据包 + app trace 回执逐案）：
+    - 顶级鼠标点击全程 100% 吃（每轮 trace「点开菜单」在记）；
+    - F10→RIGHT×k→ENTER 键序在云上 F10 频繁被吞，RIGHT/ENTER 落进编辑器
+      （C01/C02 多余换行实锤：每失败一轮文档多 3 个 CRLF）——顶级弃键盘；
+    - 弹层开后 DOWN×idx+ENTER 激活可行但偶发假成功（v35 激活后不验证：
+      T01 打底天青、O08b 新建、T02 设置全是假成功）；
+    - esc_cleanup 收尾会把激活刚打开的对话框/选择器关掉（F04/O06 实锤，
+      激活 trace 在记、画面差分 0）——弹窗类目标 keep_open=True 跳过收尾；
+    - app trace「菜单项：{文本}」回执 = 激活真值（v35 已挂接）。
+
+    v36 流程：顶级一律鼠标点击（差分验证）→ 弹层内 DOWN×idx+ENTER 激活
+    → trace 回执验证，未记则行带坐标直点兜底 → 再验，仍无回执收层重试；
+    二级先 RIGHT 展开（差分验证，未开退坐标点击父项——v35 实锤可展开），
+    再 DOWN×sidx+ENTER 同法验证。用例以自身断言诚实记红，失败返回 False。"""
     tops = ["文件", "编辑", "搜索", "查看", "语言", "编码", "主题", "工具"]
     if top not in tops:
         print(f"menu_xy[{top}>{item}>{sub}] 无顶级序映射", flush=True)
         return False
-    k = tops.index(top)
     for attempt in range(3):
         esc_cleanup()
         focus_main()
-        mark = trace_mark()
         try:
             import win32gui
             l, t, _r, _b = win32gui.GetWindowRect(WIN_HANDLE)
@@ -1743,39 +1762,23 @@ def menu_xy(top, item=None, sub=None):
             return False
         tc = l + TOP_MENU_XY[top][0]
         pre = grab_img()
-        # ① F10 聚焦菜单条 → RIGHT×k → ENTER 开弹层
-        send_keys("{F10}")
-        time.sleep(0.6)
-        for _ in range(k):
-            send_keys("{RIGHT}")
-            time.sleep(0.3)
-        send_keys("{ENTER}")
-        time.sleep(0.8)
+        if not _click_top_by_layout(top):
+            return False
         post = grab_img()
-        strip = (tc - 8, t + 82, tc + 100, t + 510)   # PIL 顺序 (x0,y0,x1,y1)
+        strip = (tc - 8, t + 82, tc + 100, t + 510)
         d = _region_diff(pre, post, strip)
         bands = _ink_bands(post, strip[0], strip[2], strip[1], strip[3])
         if d < 0.002 or not bands:
-            # F10 路径未开：退回 v33 鼠标顶级点击（trace 实证必拉开）
-            print(f"menu_xy[{top}] 第{attempt+1}次 F10 弹层未开（差分 {d:.5f}），退鼠标顶级", flush=True)
-            _click_top_by_layout(top)
-            time.sleep(0.5)
+            time.sleep(0.8)
             post = grab_img()
             d = _region_diff(pre, post, strip)
             bands = _ink_bands(post, strip[0], strip[2], strip[1], strip[3])
-            if d < 0.002 or not bands:
-                time.sleep(0.8)
-                post = grab_img()
-                d = _region_diff(pre, post, strip)
-                bands = _ink_bands(post, strip[0], strip[2], strip[1], strip[3])
-            if d < 0.002 or not bands:
-                print(f"menu_xy[{top}] 第{attempt+1}次弹层未开（差分 {d:.5f}，行带 {len(bands)}）", flush=True)
-                esc_cleanup()
-                trace_since(mark)
-                continue
+        if d < 0.002 or not bands:
+            print(f"menu_xy[{top}] 第{attempt+1}次顶级弹层未开（差分 {d:.5f}，行带 {len(bands)}）", flush=True)
+            continue
         if item is None:
-            esc_cleanup()
-            trace_since(mark)
+            if not keep_open:
+                esc_cleanup()
             return True
         idx = MENU_INDEX.get(top, {}).get(item)
         if idx is None and top == "语言" and item in LANGS:
@@ -1784,55 +1787,74 @@ def menu_xy(top, item=None, sub=None):
             print(f"menu_xy[{top}>{item}] 无序号映射", flush=True)
             esc_cleanup()
             return False
-        # ② 键盘逐项：首个 DOWN 从顶级项进入弹层首项，再 DOWN×idx
+        mark = trace_mark()
+        # 通道一：键盘 DOWN×idx + ENTER（v35 成功主路径）
         for _ in range(idx):
             send_keys("{DOWN}")
             time.sleep(0.28)
-        if sub is None:
-            send_keys("{ENTER}")
-            time.sleep(0.6)
+        send_keys("{ENTER}")
+        ok = _trace_wait_item(mark, item)
+        if not ok:
+            # 通道二：行带坐标直点（v35 坐标点击父项实证可作用于弹层）
+            band = _pick_band(bands, idx, t + 95.5 + 31.7 * idx)
+            if band:
+                _click_xy(band[2] + 10, band[0])
+                time.sleep(0.5)
+            ok = _trace_wait_item(mark, item, wait=1.2)
+        if not ok:
+            print(f"menu_xy[{top}>{item}] 第{attempt+1}次激活无回执，重试", flush=True)
             esc_cleanup()
-            trace_since(mark)
+            continue
+        if sub is None:
+            if not keep_open:
+                esc_cleanup()
             return True
-        # ③ 二级：RIGHT 展开子弹层（差分验证，未开退坐标兜底）
         subs = SUB_ITEMS.get((top, item), [])
         if sub not in subs:
             print(f"menu_xy[{top}>{item}>{sub}] 无二级序号映射", flush=True)
             esc_cleanup()
             return False
+        sidx = subs.index(sub)
         sx = tc + SEC_LEFT_OFF.get((top, item), 105)
         strip2 = (sx + 4, t + 82, sx + 200, t + 560)
-        send_keys("{RIGHT}")
-        time.sleep(0.8)
-        post2 = grab_img()
-        d2 = _region_diff(post, post2, strip2)
-        bands2 = _ink_bands(post2, strip2[0], strip2[2], strip2[1], strip2[3])
-        if d2 < 0.002 or not bands2:
+        opened2 = False
+        band = None
+        for ch in range(2):
+            send_keys("{RIGHT}")
             time.sleep(0.8)
             post2 = grab_img()
             d2 = _region_diff(post, post2, strip2)
             bands2 = _ink_bands(post2, strip2[0], strip2[2], strip2[1], strip2[3])
-        if d2 < 0.002 or not bands2:
-            print(f"menu_xy[{top}>{item}>{sub}] 第{attempt+1}次二级弹层未开（差分 {d2:.5f}），退坐标点击", flush=True)
-            # v33 基线兜底：行带点击父项展开（v33 曾单轮偶中）
-            band = _pick_band(bands, idx, t + 95.5 + 31.7 * idx) or (int(t + 95.5 + 31.7 * idx), 0, tc + 35)
-            _click_xy(band[2], band[0])
-            time.sleep(0.9)
-            post2 = grab_img()
-            d2 = _region_diff(post, post2, strip2)
-            bands2 = _ink_bands(post2, strip2[0], strip2[2], strip2[1], strip2[3])
-            if d2 < 0.002 or not bands2:
-                esc_cleanup()
-                trace_since(mark)
-                continue
-        sidx = subs.index(sub)
+            if d2 >= 0.002 and bands2:
+                opened2 = True
+                band = _pick_band(bands, idx, t + 95.5 + 31.7 * idx)
+                break
+            band = _pick_band(bands, idx, t + 95.5 + 31.7 * idx)
+            if band:
+                _click_xy(band[2] + 10, band[0])   # v33 基线坐标点击父项=展开
+                time.sleep(0.7)
+        if not opened2:
+            print(f"menu_xy[{top}>{item}>{sub}] 第{attempt+1}次二级弹层未开", flush=True)
+            esc_cleanup()
+            continue
+        mark2 = trace_mark()
         for _ in range(sidx):
             send_keys("{DOWN}")
             time.sleep(0.28)
         send_keys("{ENTER}")
-        time.sleep(0.6)
-        esc_cleanup()
-        trace_since(mark)
+        ok2 = _trace_wait_item(mark2, sub)
+        if not ok2:
+            band2 = _pick_band(bands2, sidx, t + 95.5 + 31.7 * sidx)
+            if band2:
+                _click_xy(sx + 50, band2[0])
+                time.sleep(0.5)
+            ok2 = _trace_wait_item(mark2, sub, wait=1.2)
+        if not ok2:
+            print(f"menu_xy[{top}>{item}>{sub}] 第{attempt+1}次激活无回执，重试", flush=True)
+            esc_cleanup()
+            continue
+        if not keep_open:
+            esc_cleanup()
         return True
     esc_cleanup()
     return False
@@ -1861,22 +1883,16 @@ def _clip_poll(want_ok, tries=4, gap=0.5):
 
 
 def comment_op(un, want_ok):
-    """注释/取消注释两段自救：先编辑器和弦（源码原生路径），剪贴板校验不达
-    再退编辑菜单坐标路径。返回最终剪贴板内容，达标与否由调用方断言。
-    v34：和弦后剪贴板改轮询（E07 重复注释实锤：单读 0.4s 未就绪误判失败，
-    兜底菜单又注释一次 → ##code-line）。"""
+    """v36：注释/取消注释统一菜单路径。v35 双轮实锤：编辑器和弦第二段
+    keybd_event 直发在云 runner 被吞（剪贴板恒为原样文本、无 # 也无 //），
+    而菜单「注释选区」通道以 trace 回执验证后可靠可重试——弃和弦，回执
+    闭环，剪贴板轮询照旧。"""
+    esc_cleanup()
     send_keys("^a")
     time.sleep(0.25)
-    chord_ctrl_k(0x55 if un else 0x43)
-    got = _clip_poll(want_ok)
-    if want_ok(got):
-        return got
-    esc_cleanup()
-    send_keys("^a")           # v34：菜单兜底前重做全选——esc_cleanup 的点击会清选区
-    time.sleep(0.25)
     menu_xy("编辑", "取消注释选区（Ctrl+K, U）" if un else "注释选区（Ctrl+K, C）")
-    time.sleep(0.5)
-    return _clip_poll(want_ok, tries=2, gap=0.4).strip()
+    time.sleep(0.4)
+    return _clip_poll(want_ok)
 
 
 def menu_kb(*titles):
@@ -2309,18 +2325,15 @@ def c_recent_menu():
 
 
 def c_export_html():
-    # v30：菜单改真人路径（menu_kb），导出文件唯一命名防旧档假绿
+    # v30：导出文件唯一命名防旧档假绿。v36：keep_open——v35 实锤激活后
+    # esc_cleanup 把系统选择器关掉（trace 激活在记、文件未生成）。
     p = os.path.join(DOCS, "taopad-export2.html")
     if os.path.exists(p):
         os.remove(p)
-    menu_xy("文件", "导出", "导出为可打印 HTML（PDF 用）…")   # v33：统一纯坐标路径
-    time.sleep(0.6)
-    if not dialog_present():
-        # 菜单没弹/路径进了编辑区：ESC 后整重试一次
-        send_keys("{ESC}")
-        time.sleep(0.4)
-        menu_xy("文件", "导出", "导出为可打印 HTML（PDF 用）…")
-        time.sleep(0.6)
+    menu_xy("文件", "导出", "导出为可打印 HTML（PDF 用）…", keep_open=True)
+    if not _wait_dialog(6.0):
+        esc_cleanup()
+        menu_xy("文件", "导出", "导出为可打印 HTML（PDF 用）…", keep_open=True)
     picker_typing(p)
     time.sleep(1.2)
     assert os.path.exists(p), "导出 HTML 未生成"
@@ -2328,6 +2341,16 @@ def c_export_html():
         head = f.read(200)
     assert "DOCTYPE html" in head or "<html" in head.lower(), "导出内容不是 HTML"
     shot("case-export-html")
+
+
+def _wait_dialog(wait=6.0):
+    """v36：轮询等待打开/保存类系统对话框出现（选择器弹出有延迟）。"""
+    t0 = time.time()
+    while time.time() - t0 < wait:
+        if dialog_present():
+            return True
+        time.sleep(0.4)
+    return False
 
 
 def c_save_all():
@@ -2367,7 +2390,7 @@ def c_settings():
     # v30：真人路径 + trace.log 断言（「设置：入口/已确认」为应用真实事件回执）。
     # 定谳：此前 menu() 未弹时 SPACE/ENTER 落编辑区（O08b 残留 'S' 实锤）= 假绿。
     mark = trace_mark()
-    menu_xy("工具", "设置…")   # v33：统一纯坐标路径
+    menu_xy("工具", "设置…", keep_open=True)   # v36：对话框开着才能收键
     time.sleep(1.3)
     shot("case-settings-dialog")
     send_keys("{SPACE}")     # 焦点默认落在第一个开关（自动换行），空格切换

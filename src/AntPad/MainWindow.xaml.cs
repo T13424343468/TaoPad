@@ -1398,7 +1398,11 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
     /// <summary>安全弹窗：已有弹窗时新弹窗直接放弃（返回 null），弹窗自身失败也不往外抛，绝不因弹窗闪退。</summary>
     async Task<ContentDialogResult?> ShowDialogSafe(ContentDialog dlg)
     {
-        if (_activeDialog is not null) return null;
+        if (_activeDialog is not null)
+        {
+            TraceLog.Write("弹窗互斥：已有弹窗未关，新弹窗放弃");
+            return null;
+        }
         try { dlg.XamlRoot ??= Content.XamlRoot; } catch { return null; }
         if (dlg.XamlRoot is null) return null;
         // 弹窗不归窗口内容树管，基调要显式对齐当前主题，否则深浅色弹窗会与主界面脱节
