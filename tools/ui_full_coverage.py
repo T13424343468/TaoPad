@@ -1144,9 +1144,16 @@ def type_text(s):
 
 def editor_clipboard():
     """全选复制回读。v36 实锤：云 runner 上 ^c 偶发被吞（现场截图选中 9、
-    剪贴板仍空）——聚焦后重试两轮复制再回读。"""
-    for _ in range(2):
-        focus_main()
+    剪贴板仍空）——聚焦后重试两轮复制再回读。
+    v37/v38 定谳：菜单激活后键盘焦点滞留 MenuBar（主题有 RestoreFocus，
+    注释/语言菜单没有），set_focus 只还原窗口焦点，^a/^c 仍被菜单条吞——
+    第一轮改真实点击编辑区还焦点（点击清选区，^a 必须在点击后重发），
+    第二轮保留 set_focus 兜底。"""
+    for attempt in range(2):
+        if attempt == 0:
+            click_editor()
+        else:
+            focus_main()
         pyperclip.copy("")
         send_keys("^a")
         time.sleep(0.25)
@@ -2108,43 +2115,56 @@ def c_lineno_toggle():
 THEMES = ["水墨", "天青", "墨夜"]
 
 
+def _bg_box():
+    """v38：采样框改窗口相对坐标（v37 实锤：全屏相对框采到桌面壁纸，
+    r-b 恒 -67，三段全灭）。取菜单栏右侧空白段（Ant.Bg 底，无文字）。
+    GetWindowRect 失败退脚本钉定的窗口锚点 (100,80)。"""
+    l, t = 100, 80
+    try:
+        import win32gui
+        wr = win32gui.GetWindowRect(WIN_HANDLE)
+        l, t = wr[0], wr[1]
+    except Exception:
+        pass
+    return (l + 465, t + 46, l + 560, t + 70)
+
+
 def _bg_tint(img, box=None):
-    """v37：主题色相探针——采样窗底(标题栏带)平均 RGB 的 r-b 色偏。
-    水墨底 #FCFBF7 偏暖(r>b)、天青底 #EDF2EF 偏青(r<b)、墨夜深底。
-    v36 实锤：两套浅底灰度差 <_pixel_changed 阈值 12，差分恒≈0 而切换真实
-    生效（trace 回执在记）——差分判据对釉色差异不灵敏，改测色偏。"""
+    """v37/v38：主题探针——采样窗底(菜单栏右侧空白带)平均 RGB 的 r-b 色偏
+    与亮度。水墨 #FCFBF7 偏暖(r>b, lum≈251)、天青 #EDF2EF 偏青(r<b, lum≈242)、
+    墨夜 #131211 深底(lum≈19)——r-b 单独分不开 天青(-2)/墨夜(+2)，
+    断言改用 (r-b, 亮度) 二维距离。"""
     if box is None:
-        w, h = img.size
-        box = (int(w*0.30), int(h*0.025), int(w*0.62), int(h*0.065))
+        box = _bg_box()
     c = img.crop(box).convert("RGB")
     px = list(c.getdata())
     n = len(px)
     r = sum(p[0] for p in px) / n
     g = sum(p[1] for p in px) / n
     b = sum(p[2] for p in px) / n
-    return r - b
+    return r - b, (r + g + b) / 3
 
 
 def c_themes():
-    # v37：差分改色相探针（原理见 _bg_tint）。打底离开水墨并校准基线，
-    # 三套逐一切换，每段断言 r-b 色偏段差明显。
+    # v38：窗口相对采样 + 二维判据（原理见 _bg_tint）。打底离开水墨并校准基线，
+    # 三套逐一切换，每段断言 (r-b,亮度) 段距明显。
     menu_xy("主题", "天青")
     time.sleep(1.0)
     esc_cleanup()
     time.sleep(0.3)
-    prev_tint = _bg_tint(grab_img())
+    prev_tint, prev_lum = _bg_tint(grab_img())
     for i, t in enumerate(THEMES):
         menu_xy("主题", t)
         time.sleep(1.0)
         esc_cleanup()
         time.sleep(0.3)
         img = grab_img()
-        cur_tint = _bg_tint(img)
+        cur_tint, cur_lum = _bg_tint(img)
         shot(f"case-theme-{i}")
-        delta = abs(cur_tint - prev_tint)
-        prev_tint = cur_tint
-        print(f"主题[{t}] 色偏 r-b={cur_tint:+.2f}（段差 {delta:.2f}）", flush=True)
-        assert delta > 6, f"主题[{t}]切换后窗底色相无变化（r-b={cur_tint:+.2f}，段差 {delta:.2f}）"
+        delta = ((cur_tint - prev_tint) ** 2 + (cur_lum - prev_lum) ** 2) ** 0.5
+        prev_tint, prev_lum = cur_tint, cur_lum
+        print(f"主题[{t}] 色偏 r-b={cur_tint:+.2f} 亮度={cur_lum:.1f}（段差 {delta:.2f}）", flush=True)
+        assert delta > 6, f"主题[{t}]切换后窗底色相无变化（r-b={cur_tint:+.2f} 亮度={cur_lum:.1f}，段差 {delta:.2f}）"
 
 
 ENCS = ["UTF-8 BOM", "UTF-16 LE", "GBK", "Big5", "UTF-8"]

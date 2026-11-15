@@ -1339,7 +1339,9 @@ public sealed class CodeEditor : Grid
 
     public bool ShowLineNumbers
     {
-        get;
+        // v37 实锤：get; + 手写 set 混搭会让 getter 读编译器幻影后备字段
+        //（恒 false），set 写孤立字段——行号栏永不显示。getter 必须同读一字段。
+        get => _showLineNumbers;
         set
         {
             if (_showLineNumbers == value) return;
