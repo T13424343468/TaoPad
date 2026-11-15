@@ -22,6 +22,7 @@ public sealed class HugeFileViewer : Window
     const int WindowLines = 500;    // 单屏渲染行数
 
     readonly string _path;
+    readonly string _name;
     long _fileLen;
     Encoding _enc = new UTF8Encoding(false);
     int _charStride = 1;            // 换行字节序列长度（UTF-16 为 2）
