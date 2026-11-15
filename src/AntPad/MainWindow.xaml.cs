@@ -275,16 +275,18 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             doc.Editor.Text = text;
             doc.Editor.SyntaxLanguage = LangDef.FromFileName(path);
             doc.Eol = DetectEol(text);
-            doc.ReadOnly = fi.Length > 2_000_000;   // 大文件只读保护
-            doc.Editor.IsReadOnly = doc.ReadOnly;
+            // v39.2（老板令）：撤 2MB 只读护栏——大文件可编辑可保存；
+            // 50MB 打开硬上限保留（渲染内存安全线）。ReadOnly 字段保留给
+            // 手工只读/无权限等真实场景。
+            doc.ReadOnly = false;
+            doc.Editor.IsReadOnly = false;
             SetDirty(doc, false);
-            doc.Tab.Header = doc.Title + (doc.ReadOnly ? "（只读）" : "");
+            doc.Tab.Header = doc.Title;
             PushRecent(path);
             UpdateStatus();
             UpdateEncChecks();
             UpdateEolChecks();
             UpdateLangChecks();
-            if (doc.ReadOnly) InfoTip("文件超过 2MB，已进入只读模式");
             SetupWatcher(doc);
         }
         catch (Exception ex)

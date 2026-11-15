@@ -2531,23 +2531,20 @@ def c_second_instance_open():
 
 
 def c_bigfile_scroll():
-    # v39：新增场景——大文件打开、状态栏行数正确、滚动画面连续变化
-    # （滚动卡死 = 差分为 0 即红）。
-    # v39 轮实锤（run 43728694460）：应用设计红线 = 文件超 2MB 自动进只读
-    # 模式（trace「文件超过 2MB，已进入只读模式」），且 5.6MB 加载期间
-    # UIA 全树读取饿死（状态栏轮询 40s 只剩窗名）。用例改为 2MB 内可编辑
-    # 大文件（1.6MB/1.2 万行）测打开与滚动流畅；>2MB 只读护栏为既有设计
-    # 行为，如实记录不在本用例断言。
+    # v39.2（老板令：大文件要能读写）——5.6MB/4 万行真实大文件全链路：
+    # 打开 → 状态栏行数正确 → 滚动画面连续变化（卡死=差分 0 即红）→
+    # 末尾追加一行并保存 → 落盘字节核验（读写闭环）。
+    # 旧 2MB 只读护栏已撤（v39.2 app 侧改动），本用例直接断言可写。
     p = os.path.join(DOCS, "taopad-bigfile.txt")
-    lines = 12000
-    if not os.path.exists(p) or os.path.getsize(p) < 1_000_000:
+    lines = 40000
+    if not os.path.exists(p) or os.path.getsize(p) < 4_000_000:
         with open(p, "w", encoding="utf-8") as f:
             for i in range(lines):
                 f.write(f"L{i:05d}-" + "ABCDEFGH" * 16 + "\n")
     esc_cleanup()
     t0 = time.time()
     _forward_open(p)
-    status_has(contains=f"行数 {lines}", timeout=40)
+    status_has(contains=f"行数 {lines}", timeout=60)
     print(f"大文件打开到状态栏更新: {time.time()-t0:.1f}s", flush=True)
     click_editor()
     s0 = grab_img()
@@ -2559,6 +2556,25 @@ def c_bigfile_scroll():
     print(f"大文件滚动差分: {d:.5f}", flush=True)
     assert d > 0.004, f"大文件滚动画面无变化（差分 {d:.5f}）——疑似卡死"
     shot("case-bigfile")
+    # 写回闭环：末尾追加标记行，直接保存（文件已有路径不走选择器），
+    # 轮询落盘字节里必须含标记——大文件「可写」的硬断言。
+    send_keys("^{END}")
+    time.sleep(0.5)
+    type_text("\ntaopad-big-write-校验行")
+    send_keys("^s")
+    ok_save = False
+    for _ in range(10):
+        time.sleep(1.5)
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                tail = f.read()[-200:]
+            if "taopad-big-write-校验行" in tail:
+                ok_save = True
+                break
+        except OSError:
+            continue
+    assert ok_save, "大文件保存落盘超时，末尾标记未写入"
+    shot("case-bigfile-saved")
     esc_cleanup()
 
 
