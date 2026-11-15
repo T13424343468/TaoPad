@@ -2531,10 +2531,13 @@ def c_second_instance_open():
 
 
 def c_bigfile_scroll():
-    # v39.2（老板令：大文件要能读写）——5.6MB/4 万行真实大文件全链路：
-    # 打开 → 状态栏行数正确 → 滚动画面连续变化（卡死=差分 0 即红）→
-    # 末尾追加一行并保存 → 落盘字节核验（读写闭环）。
-    # 旧 2MB 只读护栏已撤（v39.2 app 侧改动），本用例直接断言可写。
+    # v39.5（老板令：大文件要能读写）——5.6MB/4 万行真实大文件全链路：
+    # 打开 → 滚动画面连续变化（卡死=差分 0 即红）→ 末尾追加一行并保存
+    # → 落盘字节核验（读写闭环，比界面读数更硬）。
+    # 断言策略（两轮实锤 run 43728694460/43733372366）：5.6MB 文档会把
+    # UIA 全树枚举拖死（状态栏文字都读不出，只剩窗名），但应用没挂
+    # （标题活着、滚动活着、退出正常）。故行数断言改为落盘字节核验，
+    # 状态栏读数不作为大文件用例的断言通道；滚动差分保留为冻结探针。
     p = os.path.join(DOCS, "taopad-bigfile.txt")
     lines = 40000
     if not os.path.exists(p) or os.path.getsize(p) < 4_000_000:
@@ -2544,8 +2547,10 @@ def c_bigfile_scroll():
     esc_cleanup()
     t0 = time.time()
     _forward_open(p)
-    status_has(contains=f"行数 {lines}", timeout=60)
-    print(f"大文件打开到状态栏更新: {time.time()-t0:.1f}s", flush=True)
+    time.sleep(8)                    # 后台读取 + 界面落位
+    ts = texts()
+    assert any("taopad-bigfile" in t for t in ts), f"大文件标签未打开: {ts[:6]}"
+    print(f"大文件打开到标签可见: {time.time()-t0:.1f}s", flush=True)
     click_editor()
     s0 = grab_img()
     send_keys("{PGDN}")
@@ -2559,11 +2564,11 @@ def c_bigfile_scroll():
     # 写回闭环：末尾追加标记行，直接保存（文件已有路径不走选择器），
     # 轮询落盘字节里必须含标记——大文件「可写」的硬断言。
     send_keys("^{END}")
-    time.sleep(0.5)
+    time.sleep(1.0)
     type_text("\ntaopad-big-write-校验行")
     send_keys("^s")
     ok_save = False
-    for _ in range(10):
+    for _ in range(20):
         time.sleep(1.5)
         try:
             with open(p, "r", encoding="utf-8") as f:
