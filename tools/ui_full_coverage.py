@@ -86,6 +86,26 @@ def esc_clear():
         pass
 
 
+def esc_cleanup():
+    """v34 强化：确定性双通道收层。v18/第11轮双实锤——单发 ESC 收不掉 WinUI
+    菜单弹层（二级+一级叠开时一次只收一层），残留弹层把下一次顶级点击变成
+    "切层"，T01 顶级 4 连点只成 2 次即此根因。双 ESC 覆盖二级叠开 + 点击编辑区
+    （WinUI MenuBar 失焦自动收层），两通道保证弹层收干净、焦点回编辑区。"""
+    try:
+        from pywinauto.keyboard import send_keys as _sk
+        _sk("{ESC}")
+        time.sleep(0.45)
+        _sk("{ESC}")
+        time.sleep(0.45)
+    except Exception:
+        pass
+    try:
+        click_editor()
+    except Exception:
+        pass
+    time.sleep(0.3)
+
+
 def close_menus_uia():
     """v19：UIA 确定性收层（父进程侧入口，worker_run 转发到 worker 内执行）。
     v18 班实锤（run 43554708080 失败截图：E07 现场语言下拉悬空未关）：WinUI MenuBar
@@ -1521,10 +1541,58 @@ def worker_menu_hit(title, wait=6.0):
     return None
 
 
+# v34 点击注入换刀（43649051295 实锤回灌）：mouse_event 连发 down/up 零间隔，
+# 云 runner 上 WinUI 弹层收得到悬停（FAIL-O06/O08b 现场项高亮清晰）却收不到
+# 点击——Tapped 判定需要 down/up 之间消息循环有机会处理。改 SendInput down/up
+# 分离带 40ms + 悬停高亮前置验证：光标落位后菜单项必有填充高亮，高亮确认才
+# 按、未亮重移，把"点了没生效"从静默变成可重试。
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+
+
+class _MouseInput(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_ulong), ("mi", ctypes.c_ulong * 5)]
+
+
+def _send_click_now():
+    """SendInput 左键 down → 40ms → up（分离式，给弹层消息循环留处理窗口）"""
+    down = _MouseInput()
+    down.type = 0
+    down.mi = (ctypes.c_ulong * 5)(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+    up = _MouseInput()
+    up.type = 0
+    up.mi = (ctypes.c_ulong * 5)(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+    ctypes.windll.user32.SendInput(1, ctypes.byref(down), ctypes.sizeof(_MouseInput))
+    time.sleep(0.04)
+    ctypes.windll.user32.SendInput(1, ctypes.byref(up), ctypes.sizeof(_MouseInput))
+    time.sleep(0.12)
+
+
+def _hover_confirmed(x, y, pre):
+    """悬停高亮验证：SetCursorPos 后菜单项必有填充高亮，小邻域与点击前帧差分明显"""
+    ctypes.windll.user32.SetCursorPos(int(x), int(y))
+    time.sleep(0.35)
+    post = grab_img()
+    box = (int(x) - 55, int(y) - 11, int(x) + 75, int(y) + 11)
+    return _region_diff(pre, post, box) > 0.02
+
+
 def _click_xy(x, y):
+    pre = grab_img()
+    x, y = int(x), int(y)
+    for _ in range(2):
+        if _hover_confirmed(x, y, pre):
+            break
+        # 首次移动未触发悬停反馈：原位重试一次（部分会话首次 WM_MOUSEMOVE 丢失）
+        ctypes.windll.user32.SetCursorPos(x + 2, y + 2)
+        time.sleep(0.2)
+        ctypes.windll.user32.SetCursorPos(x, y)
+        time.sleep(0.25)
+        if _hover_confirmed(x, y, pre):
+            break
     ctypes.windll.user32.SetCursorPos(x, y)
-    ctypes.windll.user32.mouse_event(2, 0, 0, 0, 0)
-    ctypes.windll.user32.mouse_event(4, 0, 0, 0, 0)
+    time.sleep(0.1)
+    _send_click_now()
     time.sleep(0.7)
 
 
@@ -1654,86 +1722,91 @@ def menu_xy(top, item=None, sub=None):
     （行带序号 = XAML 项序，期望 y 邻域 ±22 双重校验，弹层拉开差分 ≥0.002
     前置验证）→ 坐标点击；二级弹层同法，首项锚父项实际行带 y+4。
     任一环失败即 ESC 收场返回 False，用例以自身断言诚实记红。
-    全程零 UIA 调用、零键盘。"""
-    close_panel(verify=False)
-    focus_main()
-    mark = trace_mark()
-    try:
-        import win32gui
-        l, t, _r, _b = win32gui.GetWindowRect(WIN_HANDLE)
-    except Exception:
-        print(f"menu_xy[{top}>{item}>{sub}] 窗口矩形获取失败", flush=True)
-        return False
-    tc = l + TOP_MENU_XY[top][0]
-    pre = grab_img()
-    _click_top_by_layout(top)          # 内部 sleep 0.8
-    post = grab_img()
-    strip = (tc - 8, t + 82, tc + 100, t + 510)   # PIL 顺序 (x0,y0,x1,y1)
-    d = _region_diff(pre, post, strip)
-    bands = _ink_bands(post, strip[0], strip[2], strip[1], strip[3])
-    if d < 0.002 or not bands:
-        time.sleep(0.8)
+    全程零 UIA 调用、零键盘。
+    v34：整流程重试最多 3 次（43649051295 实锤：单次尝试失败率高——悬停
+    到了点击不生效、顶级点开被残留弹层切层——收层重试是唯一保险）。"""
+    for attempt in range(3):
+        close_panel(verify=False)
+        focus_main()
+        mark = trace_mark()
+        try:
+            import win32gui
+            l, t, _r, _b = win32gui.GetWindowRect(WIN_HANDLE)
+        except Exception:
+            print(f"menu_xy[{top}>{item}>{sub}] 窗口矩形获取失败", flush=True)
+            return False
+        tc = l + TOP_MENU_XY[top][0]
+        pre = grab_img()
+        _click_top_by_layout(top)          # 内部 sleep 0.8
         post = grab_img()
+        strip = (tc - 8, t + 82, tc + 100, t + 510)   # PIL 顺序 (x0,y0,x1,y1)
         d = _region_diff(pre, post, strip)
         bands = _ink_bands(post, strip[0], strip[2], strip[1], strip[3])
-    if d < 0.002 or not bands:
-        print(f"menu_xy[{top}] 弹层未拉开（差分 {d:.5f}，行带 {len(bands)}）", flush=True)
-        shot(f"menuxy-{top}-noflyout")
-        esc_cleanup()
-        trace_since(mark)
-        return False
-    if item is None:
-        trace_since(mark)
-        return True
-    idx = MENU_INDEX.get(top, {}).get(item)
-    if idx is None and top == "语言" and item in LANGS:
-        idx = LANGS.index(item)
-    if idx is None:
-        print(f"menu_xy[{top}>{item}] 无序号映射", flush=True)
-        esc_cleanup()
-        return False
-    y_exp = t + 95.5 + 31.7 * idx
-    band = _pick_band(bands, idx, y_exp)
-    if band is None:
-        band = (int(y_exp), 0, tc + 35)
-        print(f"menu_xy[{top}>{item}] 行带未命中，退固定坐标 y={int(y_exp)}", flush=True)
-    _click_xy(band[2], band[0])
-    if sub is None:
-        esc_cleanup()
-        trace_since(mark)
-        return True
-    time.sleep(0.4)
-    post2 = grab_img()
-    sx = tc + SEC_LEFT_OFF.get((top, item), 105)
-    strip2 = (sx + 4, band[0] - 24, sx + 190, band[0] + 180)   # PIL 顺序
-    d2 = _region_diff(post, post2, strip2)
-    bands2 = _ink_bands(post2, strip2[0], strip2[2], strip2[1], strip2[3])
-    if d2 < 0.002 or not bands2:
-        time.sleep(0.8)
+        if d < 0.002 or not bands:
+            time.sleep(0.8)
+            post = grab_img()
+            d = _region_diff(pre, post, strip)
+            bands = _ink_bands(post, strip[0], strip[2], strip[1], strip[3])
+        if d < 0.002 or not bands:
+            print(f"menu_xy[{top}] 第{attempt+1}次弹层未拉开（差分 {d:.5f}，行带 {len(bands)}）", flush=True)
+            shot(f"menuxy-{top}-noflyout-{attempt}")
+            esc_cleanup()
+            trace_since(mark)
+            continue                        # v34：收层重开整流程
+        if item is None:
+            trace_since(mark)
+            return True
+        idx = MENU_INDEX.get(top, {}).get(item)
+        if idx is None and top == "语言" and item in LANGS:
+            idx = LANGS.index(item)
+        if idx is None:
+            print(f"menu_xy[{top}>{item}] 无序号映射", flush=True)
+            esc_cleanup()
+            return False
+        y_exp = t + 95.5 + 31.7 * idx
+        band = _pick_band(bands, idx, y_exp)
+        if band is None:
+            band = (int(y_exp), 0, tc + 35)
+            print(f"menu_xy[{top}>{item}] 行带未命中，退固定坐标 y={int(y_exp)}", flush=True)
+        _click_xy(band[2], band[0])
+        if sub is None:
+            esc_cleanup()
+            trace_since(mark)
+            return True
+        time.sleep(0.4)
         post2 = grab_img()
+        sx = tc + SEC_LEFT_OFF.get((top, item), 105)
+        strip2 = (sx + 4, band[0] - 24, sx + 190, band[0] + 180)   # PIL 顺序
         d2 = _region_diff(post, post2, strip2)
         bands2 = _ink_bands(post2, strip2[0], strip2[2], strip2[1], strip2[3])
-    if d2 < 0.002 or not bands2:
-        print(f"menu_xy[{top}>{item}>{sub}] 二级弹层未拉开（差分 {d2:.5f}，行带 {len(bands2)}）", flush=True)
-        shot(f"menuxy-{top}-{item}-nosub")
+        if d2 < 0.002 or not bands2:
+            time.sleep(0.8)
+            post2 = grab_img()
+            d2 = _region_diff(post, post2, strip2)
+            bands2 = _ink_bands(post2, strip2[0], strip2[2], strip2[1], strip2[3])
+        if d2 < 0.002 or not bands2:
+            print(f"menu_xy[{top}>{item}>{sub}] 第{attempt+1}次二级弹层未拉开（差分 {d2:.5f}，行带 {len(bands2)}）", flush=True)
+            shot(f"menuxy-{top}-{item}-nosub-{attempt}")
+            esc_cleanup()
+            trace_since(mark)
+            continue                        # v34：收层重开整流程
+        subs = SUB_ITEMS.get((top, item), [])
+        if sub not in subs:
+            print(f"menu_xy[{top}>{item}>{sub}] 无二级序号映射", flush=True)
+            esc_cleanup()
+            return False
+        sidx = subs.index(sub)
+        y_exp2 = band[0] + 4 + 31.7 * sidx
+        band2 = _pick_band(bands2, sidx, y_exp2)
+        if band2 is None:
+            band2 = (int(y_exp2), 0, sx + 78)
+            print(f"menu_xy[{top}>{item}>{sub}] 二级行带未命中，退固定坐标 y={int(y_exp2)}", flush=True)
+        _click_xy(band2[2], band2[0])
         esc_cleanup()
         trace_since(mark)
-        return False
-    subs = SUB_ITEMS.get((top, item), [])
-    if sub not in subs:
-        print(f"menu_xy[{top}>{item}>{sub}] 无二级序号映射", flush=True)
-        esc_cleanup()
-        return False
-    sidx = subs.index(sub)
-    y_exp2 = band[0] + 4 + 31.7 * sidx
-    band2 = _pick_band(bands2, sidx, y_exp2)
-    if band2 is None:
-        band2 = (int(y_exp2), 0, sx + 78)
-        print(f"menu_xy[{top}>{item}>{sub}] 二级行带未命中，退固定坐标 y={int(y_exp2)}", flush=True)
-    _click_xy(band2[2], band2[0])
+        return True
     esc_cleanup()
-    trace_since(mark)
-    return True
+    return False
 
 
 def chord_ctrl_k(second_vk):
@@ -1746,19 +1819,35 @@ def chord_ctrl_k(second_vk):
     time.sleep(0.6)
 
 
+def _clip_poll(want_ok, tries=4, gap=0.5):
+    """v34：剪贴板轮询读。第 11 轮 E07 实锤——单次 0.4s 后读剪贴板，云 runner
+    慢机器上剪贴板未就绪被误判失败，触发菜单兜底重复注释（##code-line）。
+    改轮询：达标即回，最多 tries 次。"""
+    for i in range(tries):
+        got = editor_clipboard().strip()
+        if want_ok(got):
+            return got
+        time.sleep(gap)
+    return editor_clipboard().strip()
+
+
 def comment_op(un, want_ok):
     """注释/取消注释两段自救：先编辑器和弦（源码原生路径），剪贴板校验不达
-    再退编辑菜单坐标路径。返回最终剪贴板内容，达标与否由调用方断言。"""
+    再退编辑菜单坐标路径。返回最终剪贴板内容，达标与否由调用方断言。
+    v34：和弦后剪贴板改轮询（E07 重复注释实锤：单读 0.4s 未就绪误判失败，
+    兜底菜单又注释一次 → ##code-line）。"""
     send_keys("^a")
     time.sleep(0.25)
     chord_ctrl_k(0x55 if un else 0x43)
-    got = editor_clipboard().strip()
+    got = _clip_poll(want_ok)
     if want_ok(got):
         return got
     esc_cleanup()
+    send_keys("^a")           # v34：菜单兜底前重做全选——esc_cleanup 的点击会清选区
+    time.sleep(0.25)
     menu_xy("编辑", "取消注释选区（Ctrl+K, U）" if un else "注释选区（Ctrl+K, C）")
     time.sleep(0.5)
-    return editor_clipboard().strip()
+    return _clip_poll(want_ok, tries=2, gap=0.4).strip()
 
 
 def menu_kb(*titles):
