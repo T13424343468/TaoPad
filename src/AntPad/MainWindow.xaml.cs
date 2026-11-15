@@ -16,6 +16,7 @@ using Windows.ApplicationModel.Activation;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
 using Windows.Storage.Pickers;
+using System.Linq;
 using System.Net.Http;
 using WinRT.Interop;
 
@@ -61,6 +62,7 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
         App.TrackWindow(this);
         Closed += (_, _) => App.UntrackWindow(this);
         BuildLangMenu();
+        HookMenuTracing();  // v35：全量菜单项 Click 追踪，供云测定谳 app/脚本侧
         ApplyThemeBrushes();   // 构造后直涂大面（IThemePaintable：构造后涂）
 
         // 【真凶修复】此前这里给"设置"菜单项挂了编号 188（Ctrl+OEM 逗号）的快捷键。
@@ -381,6 +383,37 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
     {
         var name = sender is Microsoft.UI.Xaml.Controls.MenuBarItem m ? m.Title : "?";
         TraceLog.Write($"按下菜单：{name}");
+    }
+
+    // v35 菜单项点击追踪：区分"脚本没点到"与"点到了但 app 没响应"的定谳依据。
+    readonly HashSet<Microsoft.UI.Xaml.Controls.MenuFlyoutItemBase> _menuTraceHooked = new();
+
+    /// <summary>挂接全部菜单项的 Click 记录：含子菜单，任何一次真实激活都会留下 trace。</summary>
+    void HookMenuTracing()
+    {
+        try { HookMenuItems(); }
+        catch (Exception ex) { TraceLog.Write($"菜单追踪挂接失败：{ex.Message}"); }
+    }
+
+    void HookMenuItems()
+    {
+        if (MenuBar == null) return;
+        foreach (var mb in MenuBar.Items.OfType<Microsoft.UI.Xaml.Controls.MenuBarItem>())
+            foreach (var it in mb.Items) HookFlyout(it);
+    }
+
+    void HookFlyout(Microsoft.UI.Xaml.Controls.MenuFlyoutItemBase item)
+    {
+        if (item == null || !_menuTraceHooked.Add(item)) return;
+        if (item is Microsoft.UI.Xaml.Controls.MenuFlyoutSubItem sub)
+        {
+            sub.Opening += (s, e) => { foreach (var c in sub.Items) HookFlyout(c); TraceLog.Write($"展开子菜单：{sub.Text}"); };
+            foreach (var c in sub.Items) HookFlyout(c);
+        }
+        else
+        {
+            item.Click += (s, e) => TraceLog.Write($"菜单项：{(item as Microsoft.UI.Xaml.Controls.MenuFlyoutItem)?.Text ?? item.Name}");
+        }
     }
 
     async void OnSettings(object sender, RoutedEventArgs e)

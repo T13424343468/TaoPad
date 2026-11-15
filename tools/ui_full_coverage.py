@@ -1578,21 +1578,13 @@ def _hover_confirmed(x, y, pre):
 
 
 def _click_xy(x, y):
-    pre = grab_img()
-    x, y = int(x), int(y)
-    for _ in range(2):
-        if _hover_confirmed(x, y, pre):
-            break
-        # 首次移动未触发悬停反馈：原位重试一次（部分会话首次 WM_MOUSEMOVE 丢失）
-        ctypes.windll.user32.SetCursorPos(x + 2, y + 2)
-        time.sleep(0.2)
-        ctypes.windll.user32.SetCursorPos(x, y)
-        time.sleep(0.25)
-        if _hover_confirmed(x, y, pre):
-            break
-    ctypes.windll.user32.SetCursorPos(x, y)
-    time.sleep(0.1)
-    _send_click_now()
+    """v35 回滚到 v33 基线：SetCursorPos + mouse_event 直点（v34 SendInput
+    分离式+悬停前置验证实测更差，43716470756 实锤回滚）。"""
+    ctypes.windll.user32.SetCursorPos(int(x), int(y))
+    time.sleep(0.12)
+    ctypes.windll.user32.mouse_event(2, 0, 0, 0, 0)
+    time.sleep(0.04)
+    ctypes.windll.user32.mouse_event(4, 0, 0, 0, 0)
     time.sleep(0.7)
 
 
@@ -1717,16 +1709,30 @@ def _pick_band(bands, idx, y_exp):
 
 
 def menu_xy(top, item=None, sub=None):
-    """v33：无 UIA 纯坐标菜单驱动。
-    顶级固定坐标点击（trace 实证必拉开）→ 窄条带行带扫描定位目标项
-    （行带序号 = XAML 项序，期望 y 邻域 ±22 双重校验，弹层拉开差分 ≥0.002
-    前置验证）→ 坐标点击；二级弹层同法，首项锚父项实际行带 y+4。
-    任一环失败即 ESC 收场返回 False，用例以自身断言诚实记红。
-    全程零 UIA 调用、零键盘。
-    v34：整流程重试最多 3 次（43649051295 实锤：单次尝试失败率高——悬停
-    到了点击不生效、顶级点开被残留弹层切层——收层重试是唯一保险）。"""
+    """v35：全键盘菜单驱动（O05 最近文件用例唯一云上实证通道）。
+
+    十轮实锤定谳（43649051295 / 43716470756 双轮日志+截图）：
+    - 云端会话合成鼠标点击：顶级 MenuBarItem 吃得到（程序 trace「点开菜单」
+      全程在记），但一级弹层项点击从不激活——二级弹层差分恒 0.00000
+      （编码/查看/主题/文件>导出 全灭）；v33 首轮偶中、v34 全灭；
+    - v34 的 SendInput 分离式+悬停前置验证与双 ESC+点击编辑区收层，实测
+      比 v33 基线更差（V02 on段 0.056→0.0038，C01 连文件都存不出来），
+      按修红升级线整体回滚；
+    - 唯一全程吃得开的是 c_recent_menu 的键盘菜单序：F10 聚焦菜单条 →
+      RIGHT 移顶级项 → ENTER 开弹层 → DOWN 逐项 → ENTER 激活。
+
+    v35 流程：esc 清场 → F10 → RIGHT×k → ENTER 开弹层（strip 差分前置
+    验证，未开退回鼠标顶级点击重试）→ DOWN×idx →（有二级：RIGHT 展开，
+    二级差分验证）→ DOWN×sidx → ENTER 激活。激活后弹层自关，收尾单 ESC。
+    行序号沿用 MENU_INDEX / SUB_ITEMS（分隔线不占序号，与键盘导航一致）。
+    用例以自身断言诚实记红，本函数失败返回 False。"""
+    tops = ["文件", "编辑", "搜索", "查看", "语言", "编码", "主题", "工具"]
+    if top not in tops:
+        print(f"menu_xy[{top}>{item}>{sub}] 无顶级序映射", flush=True)
+        return False
+    k = tops.index(top)
     for attempt in range(3):
-        close_panel(verify=False)
+        esc_cleanup()
         focus_main()
         mark = trace_mark()
         try:
@@ -1737,23 +1743,38 @@ def menu_xy(top, item=None, sub=None):
             return False
         tc = l + TOP_MENU_XY[top][0]
         pre = grab_img()
-        _click_top_by_layout(top)          # 内部 sleep 0.8
+        # ① F10 聚焦菜单条 → RIGHT×k → ENTER 开弹层
+        send_keys("{F10}")
+        time.sleep(0.6)
+        for _ in range(k):
+            send_keys("{RIGHT}")
+            time.sleep(0.3)
+        send_keys("{ENTER}")
+        time.sleep(0.8)
         post = grab_img()
         strip = (tc - 8, t + 82, tc + 100, t + 510)   # PIL 顺序 (x0,y0,x1,y1)
         d = _region_diff(pre, post, strip)
         bands = _ink_bands(post, strip[0], strip[2], strip[1], strip[3])
         if d < 0.002 or not bands:
-            time.sleep(0.8)
+            # F10 路径未开：退回 v33 鼠标顶级点击（trace 实证必拉开）
+            print(f"menu_xy[{top}] 第{attempt+1}次 F10 弹层未开（差分 {d:.5f}），退鼠标顶级", flush=True)
+            _click_top_by_layout(top)
+            time.sleep(0.5)
             post = grab_img()
             d = _region_diff(pre, post, strip)
             bands = _ink_bands(post, strip[0], strip[2], strip[1], strip[3])
-        if d < 0.002 or not bands:
-            print(f"menu_xy[{top}] 第{attempt+1}次弹层未拉开（差分 {d:.5f}，行带 {len(bands)}）", flush=True)
-            shot(f"menuxy-{top}-noflyout-{attempt}")
-            esc_cleanup()
-            trace_since(mark)
-            continue                        # v34：收层重开整流程
+            if d < 0.002 or not bands:
+                time.sleep(0.8)
+                post = grab_img()
+                d = _region_diff(pre, post, strip)
+                bands = _ink_bands(post, strip[0], strip[2], strip[1], strip[3])
+            if d < 0.002 or not bands:
+                print(f"menu_xy[{top}] 第{attempt+1}次弹层未开（差分 {d:.5f}，行带 {len(bands)}）", flush=True)
+                esc_cleanup()
+                trace_since(mark)
+                continue
         if item is None:
+            esc_cleanup()
             trace_since(mark)
             return True
         idx = MENU_INDEX.get(top, {}).get(item)
@@ -1763,20 +1784,27 @@ def menu_xy(top, item=None, sub=None):
             print(f"menu_xy[{top}>{item}] 无序号映射", flush=True)
             esc_cleanup()
             return False
-        y_exp = t + 95.5 + 31.7 * idx
-        band = _pick_band(bands, idx, y_exp)
-        if band is None:
-            band = (int(y_exp), 0, tc + 35)
-            print(f"menu_xy[{top}>{item}] 行带未命中，退固定坐标 y={int(y_exp)}", flush=True)
-        _click_xy(band[2], band[0])
+        # ② 键盘逐项：首个 DOWN 从顶级项进入弹层首项，再 DOWN×idx
+        for _ in range(idx):
+            send_keys("{DOWN}")
+            time.sleep(0.28)
         if sub is None:
+            send_keys("{ENTER}")
+            time.sleep(0.6)
             esc_cleanup()
             trace_since(mark)
             return True
-        time.sleep(0.4)
-        post2 = grab_img()
+        # ③ 二级：RIGHT 展开子弹层（差分验证，未开退坐标兜底）
+        subs = SUB_ITEMS.get((top, item), [])
+        if sub not in subs:
+            print(f"menu_xy[{top}>{item}>{sub}] 无二级序号映射", flush=True)
+            esc_cleanup()
+            return False
         sx = tc + SEC_LEFT_OFF.get((top, item), 105)
-        strip2 = (sx + 4, band[0] - 24, sx + 190, band[0] + 180)   # PIL 顺序
+        strip2 = (sx + 4, t + 82, sx + 200, t + 560)
+        send_keys("{RIGHT}")
+        time.sleep(0.8)
+        post2 = grab_img()
         d2 = _region_diff(post, post2, strip2)
         bands2 = _ink_bands(post2, strip2[0], strip2[2], strip2[1], strip2[3])
         if d2 < 0.002 or not bands2:
@@ -1785,23 +1813,24 @@ def menu_xy(top, item=None, sub=None):
             d2 = _region_diff(post, post2, strip2)
             bands2 = _ink_bands(post2, strip2[0], strip2[2], strip2[1], strip2[3])
         if d2 < 0.002 or not bands2:
-            print(f"menu_xy[{top}>{item}>{sub}] 第{attempt+1}次二级弹层未拉开（差分 {d2:.5f}，行带 {len(bands2)}）", flush=True)
-            shot(f"menuxy-{top}-{item}-nosub-{attempt}")
-            esc_cleanup()
-            trace_since(mark)
-            continue                        # v34：收层重开整流程
-        subs = SUB_ITEMS.get((top, item), [])
-        if sub not in subs:
-            print(f"menu_xy[{top}>{item}>{sub}] 无二级序号映射", flush=True)
-            esc_cleanup()
-            return False
+            print(f"menu_xy[{top}>{item}>{sub}] 第{attempt+1}次二级弹层未开（差分 {d2:.5f}），退坐标点击", flush=True)
+            # v33 基线兜底：行带点击父项展开（v33 曾单轮偶中）
+            band = _pick_band(bands, idx, t + 95.5 + 31.7 * idx) or (int(t + 95.5 + 31.7 * idx), 0, tc + 35)
+            _click_xy(band[2], band[0])
+            time.sleep(0.9)
+            post2 = grab_img()
+            d2 = _region_diff(post, post2, strip2)
+            bands2 = _ink_bands(post2, strip2[0], strip2[2], strip2[1], strip2[3])
+            if d2 < 0.002 or not bands2:
+                esc_cleanup()
+                trace_since(mark)
+                continue
         sidx = subs.index(sub)
-        y_exp2 = band[0] + 4 + 31.7 * sidx
-        band2 = _pick_band(bands2, sidx, y_exp2)
-        if band2 is None:
-            band2 = (int(y_exp2), 0, sx + 78)
-            print(f"menu_xy[{top}>{item}>{sub}] 二级行带未命中，退固定坐标 y={int(y_exp2)}", flush=True)
-        _click_xy(band2[2], band2[0])
+        for _ in range(sidx):
+            send_keys("{DOWN}")
+            time.sleep(0.28)
+        send_keys("{ENTER}")
+        time.sleep(0.6)
         esc_cleanup()
         trace_since(mark)
         return True
