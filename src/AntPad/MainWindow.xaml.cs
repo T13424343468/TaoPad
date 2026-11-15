@@ -397,8 +397,7 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
 
     void HookMenuItems()
     {
-        if (MenuBar == null) return;
-        foreach (var mb in MenuBar.Items.OfType<Microsoft.UI.Xaml.Controls.MenuBarItem>())
+        foreach (var mb in MenuBarRoot.Items.OfType<Microsoft.UI.Xaml.Controls.MenuBarItem>())
             foreach (var it in mb.Items) HookFlyout(it);
     }
 
@@ -407,12 +406,11 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
         if (item == null || !_menuTraceHooked.Add(item)) return;
         if (item is Microsoft.UI.Xaml.Controls.MenuFlyoutSubItem sub)
         {
-            sub.Opening += (s, e) => { foreach (var c in sub.Items) HookFlyout(c); TraceLog.Write($"展开子菜单：{sub.Text}"); };
             foreach (var c in sub.Items) HookFlyout(c);
         }
-        else
+        else if (item is Microsoft.UI.Xaml.Controls.MenuFlyoutItem mi)
         {
-            item.Click += (s, e) => TraceLog.Write($"菜单项：{(item as Microsoft.UI.Xaml.Controls.MenuFlyoutItem)?.Text ?? item.Name}");
+            mi.Click += (s, e) => TraceLog.Write($"菜单项：{mi.Text}");
         }
     }
 
