@@ -1143,11 +1143,18 @@ def type_text(s):
 
 
 def editor_clipboard():
-    pyperclip.copy("")
-    send_keys("^a")
-    time.sleep(0.25)
-    send_keys("^c")
-    time.sleep(0.4)
+    """全选复制回读。v36 实锤：云 runner 上 ^c 偶发被吞（现场截图选中 9、
+    剪贴板仍空）——聚焦后重试两轮复制再回读。"""
+    for _ in range(2):
+        focus_main()
+        pyperclip.copy("")
+        send_keys("^a")
+        time.sleep(0.25)
+        send_keys("^c")
+        time.sleep(0.4)
+        got = pyperclip.paste()
+        if got != "":
+            return got
     return pyperclip.paste()
 
 
@@ -1788,13 +1795,14 @@ def menu_xy(top, item=None, sub=None, keep_open=False):
             esc_cleanup()
             return False
         mark = trace_mark()
+        is_parent = sub is not None   # 父项(MenuFlyoutSubItem)无 Click 回执，以二级差分为真值
         # 通道一：键盘 DOWN×idx + ENTER（v35 成功主路径）
         for _ in range(idx):
             send_keys("{DOWN}")
             time.sleep(0.28)
         send_keys("{ENTER}")
-        ok = _trace_wait_item(mark, item)
-        if not ok:
+        ok = True if is_parent else _trace_wait_item(mark, item)
+        if not ok and not is_parent:
             # 通道二：行带坐标直点（v35 坐标点击父项实证可作用于弹层）
             band = _pick_band(bands, idx, t + 95.5 + 31.7 * idx)
             if band:
@@ -2100,26 +2108,43 @@ def c_lineno_toggle():
 THEMES = ["水墨", "天青", "墨夜"]
 
 
+def _bg_tint(img, box=None):
+    """v37：主题色相探针——采样窗底(标题栏带)平均 RGB 的 r-b 色偏。
+    水墨底 #FCFBF7 偏暖(r>b)、天青底 #EDF2EF 偏青(r<b)、墨夜深底。
+    v36 实锤：两套浅底灰度差 <_pixel_changed 阈值 12，差分恒≈0 而切换真实
+    生效（trace 回执在记）——差分判据对釉色差异不灵敏，改测色偏。"""
+    if box is None:
+        w, h = img.size
+        box = (int(w*0.30), int(h*0.025), int(w*0.62), int(h*0.065))
+    c = img.crop(box).convert("RGB")
+    px = list(c.getdata())
+    n = len(px)
+    r = sum(p[0] for p in px) / n
+    g = sum(p[1] for p in px) / n
+    b = sum(p[2] for p in px) / n
+    return r - b
+
+
 def c_themes():
-    # v31：先打底天青——水墨是默认主题，从水墨切水墨必然无变化
-    #（43592341121 实锤 diff=0.00043 假红并连锁拖瘫后续菜单点击）
-    # v33：menu_xy 坐标驱动 + 收层后取证（主题弹层开合本身就会造成全幅差分，
-    # 不收层无法证明是换主题导致的变色）。
+    # v37：差分改色相探针（原理见 _bg_tint）。打底离开水墨并校准基线，
+    # 三套逐一切换，每段断言 r-b 色偏段差明显。
     menu_xy("主题", "天青")
     time.sleep(1.0)
     esc_cleanup()
     time.sleep(0.3)
-    prev = grab_img()
+    prev_tint = _bg_tint(grab_img())
     for i, t in enumerate(THEMES):
         menu_xy("主题", t)
         time.sleep(1.0)
         esc_cleanup()
         time.sleep(0.3)
-        cur = grab_img()
-        d = _pixel_changed(prev, cur, crop=(0.0, 0.0, 1.0, 1.0))
-        prev = cur
+        img = grab_img()
+        cur_tint = _bg_tint(img)
         shot(f"case-theme-{i}")
-        assert d > 0.02, f"主题[{t}]切换后画面无变化（差分 {d:.5f}）"
+        delta = abs(cur_tint - prev_tint)
+        prev_tint = cur_tint
+        print(f"主题[{t}] 色偏 r-b={cur_tint:+.2f}（段差 {delta:.2f}）", flush=True)
+        assert delta > 6, f"主题[{t}]切换后窗底色相无变化（r-b={cur_tint:+.2f}，段差 {delta:.2f}）"
 
 
 ENCS = ["UTF-8 BOM", "UTF-16 LE", "GBK", "Big5", "UTF-8"]

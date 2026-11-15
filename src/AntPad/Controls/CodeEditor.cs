@@ -1335,7 +1335,19 @@ public sealed class CodeEditor : Grid
         }
     }
 
-    public bool ShowLineNumbers { get; set; } = true;
+    bool _showLineNumbers = true;
+
+    public bool ShowLineNumbers
+    {
+        get;
+        set
+        {
+            if (_showLineNumbers == value) return;
+            _showLineNumbers = value;
+            _gutterKey = "";        // 开关切换后行号栏立即重估（v36 云测实锤：纯赋值无刷新，行号栏不动）
+            RedrawGutter();
+        }
+    }
 
     public double ZoomLevel => _zoom;
 
