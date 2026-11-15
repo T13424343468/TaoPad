@@ -2490,6 +2490,73 @@ def c_mouse_menu():
     assert ok, f"鼠标路径菜单未建成新标签（内容残留）: {got!r}"
 
 
+def proc_count():
+    """v39：TaoPad.exe 进程计数（tasklist 口径，与 app_alive 同源）"""
+    try:
+        out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"],
+                             capture_output=True, text=True, timeout=30).stdout
+        return sum(1 for l in out.splitlines() if "TaoPad.exe" in l)
+    except Exception:
+        return -1
+
+
+def _forward_open(path):
+    """v39：以第二实例带文件参数拉起（资源管理器双击打开的真实通道），
+    单实例机制把路径转发给主实例打开、第二进程自退。拖拽打开走同一
+    OpenPaths 管线（云上无法合成真实指针拖放，拖拽交互本身如实不在覆盖内）。"""
+    exe = find_exe()
+    subprocess.Popen([exe, path], close_fds=True)
+
+
+def c_second_instance_open():
+    # v39：新增场景——已装应用再双击文件：第二实例必须自退、主实例接住
+    # 并显示文件内容（单实例转发管线 + 打开内容正确性）。
+    p = os.path.join(DOCS, "taopad-forward.txt")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write("single-instance-forward-内容")
+    esc_cleanup()
+    _forward_open(p)
+    ok_open = False
+    for _ in range(10):               # 主实例收到转发并显示，最多等 20 秒
+        time.sleep(2.0)
+        got = editor_clipboard().strip()
+        if got == "single-instance-forward-内容":
+            ok_open = True
+            break
+    assert ok_open, f"转发打开内容不对: {got!r}"
+    time.sleep(2.0)
+    n = proc_count()
+    assert n == 1, f"第二实例进程未自退（进程数 {n}，单实例失效）"
+    shot("case-second-instance")
+
+
+def c_bigfile_scroll():
+    # v39：新增场景——大文件（约 5.6MB/4 万行）打开、状态栏行数正确、
+    # 滚动画面连续变化（滚动卡死 = 差分为 0 即红）。
+    p = os.path.join(DOCS, "taopad-bigfile.txt")
+    lines = 40000
+    if not os.path.exists(p) or os.path.getsize(p) < 4_000_000:
+        with open(p, "w", encoding="utf-8") as f:
+            for i in range(lines):
+                f.write(f"L{i:05d}-" + "ABCDEFGH" * 16 + "\n")
+    esc_cleanup()
+    t0 = time.time()
+    _forward_open(p)
+    status_has(contains=f"行数 {lines}", timeout=40)
+    print(f"大文件打开到状态栏更新: {time.time()-t0:.1f}s", flush=True)
+    click_editor()
+    s0 = grab_img()
+    send_keys("{PGDN}")
+    time.sleep(0.5)
+    send_keys("{PGDN}")
+    time.sleep(0.8)
+    d = _pixel_changed(s0, grab_img())
+    print(f"大文件滚动差分: {d:.5f}", flush=True)
+    assert d > 0.004, f"大文件滚动画面无变化（差分 {d:.5f}）——疑似卡死"
+    shot("case-bigfile")
+    esc_cleanup()
+
+
 def c_exit():
     # v33：退出主路径改 WM_CLOSE 直投主窗（App.xaml.cs 实锤闭环：
     # MainWindow.Closed → UntrackWindow → 空窗 ExitAll → Current.Exit +
@@ -2638,6 +2705,8 @@ def main():
         ("O07 标签页新增/切换/关闭", c_tabs_and_close),
         ("T02 设置对话框(开关+主题+应用)", c_settings),
         ("O08b 鼠标路径菜单对照", c_mouse_menu),
+        ("X01 单实例转发打开", c_second_instance_open),
+        ("X02 大文件打开与滚动", c_bigfile_scroll),
         ("O09 正常退出+崩溃检查", c_exit),
     ]
     part = (sys.argv[1] if len(sys.argv) > 1 else "").upper()
