@@ -76,7 +76,47 @@ public sealed class CodeEditor : Grid
     readonly List<string> _items = new();
     string _prefix = "";
     string _listKey = "";       // 候选列表指纹：内容没变就不重建弹层（防闪烁）
-    string _lastRaw = "";       // 上次规范文本：识别着色引发的"伪文本变化"事件
+    // ================= 行索引（v39.3 大文件流水线） =================
+    // 老板令：大文件要能读写且不能只加载一屏的卡顿感。解法：整读内存不变，
+    // 但把全篇扫描清成"每次编辑一次 O(n) 建索引，滚动/光标帧二分零扫描"。
+    // _lastRaw 转属性：10 处既有赋值点不变，赋值即作废索引。
+
+    string _lastRawField = "";
+    string _lastRaw
+    {
+        get => _lastRawField;
+        set { _lastRawField = value; _lineStarts = null; }
+    }
+    int[]? _lineStarts;         // 每行起始偏移；null = 待重建
+
+    int[] EnsureLineIndex()
+    {
+        if (_lineStarts is null)
+        {
+            var t = _lastRaw;
+            int n = 1;
+            foreach (var c in t) if (c == '\n') n++;
+            var s = new int[n];
+            int k = 1;
+            for (int i = 0; i < t.Length; i++) if (t[i] == '\n') s[k++] = i + 1;
+            _lineStarts = s;
+        }
+        return _lineStarts;
+    }
+
+    int TotalLines() => EnsureLineIndex().Length;
+
+    int LineFromOffset(int caret)
+    {
+        var s = EnsureLineIndex();
+        int lo = 0, hi = s.Length - 1;
+        while (lo < hi)
+        {
+            int mid = (lo + hi + 1) >> 1;
+            if (s[mid] <= caret) lo = mid; else hi = mid - 1;
+        }
+        return lo;
+    }
     int _sel;
     bool _accepting;
     bool _ctrlDown;
@@ -443,8 +483,7 @@ public sealed class CodeEditor : Grid
             // 滚动热路径（拖动滚动条时每帧进入）：一律用缓存文本 _lastRaw，
             // 绝不实时读内核文档（COM 调用），更不写文档——拖动滚动条闪退的根因
             var t = _lastRaw;
-            int total = 1;
-            foreach (var c in t) if (c == '\n') total++;
+            int total = TotalLines();   // v39.3：行索引缓存，滚动帧零扫描
 
             // 折叠区间缓存：文本变化才重算（折叠态下不重算，标记只画锚点行）
             if (!FoldActive) EnsureFolds();
@@ -573,8 +612,7 @@ public sealed class CodeEditor : Grid
             _miniView.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(92, vp.R, vp.G, vp.B));
 
             var t = _lastRaw;   // 缓存文本：不实时读内核文档
-            int total = 1;
-            foreach (var c in t) if (c == '\n') total++;
+            int total = TotalLines();   // v39.3：行索引缓存
 
             // 指纹：文本规模或高度变化才重画
             var key = $"{t.Length}|{total}|{RenderSize.Height:0}";
@@ -589,17 +627,28 @@ public sealed class CodeEditor : Grid
             var cmtColor = Windows.UI.Color.FromArgb(70, 130, 140, 155);
 
             _minimap.Children.Clear();
+            // v39.3：按行索引原位聚合，不再 Split 全篇（5.6MB 少 4 万个字符串分配）
+            var starts = EnsureLineIndex();
             int agg = 0; int width = 0; bool comment = false;
-            var lines = t.Split('\n');
-            for (int i = 0; i < lines.Length; i++)
+            for (int li = 0; li < total; li++)
             {
-                var line = lines[i];
+                int st = starts[li];
+                int en = li + 1 < total ? starts[li + 1] : t.Length;
+                int len = en - st;
+                if (len > 0 && t[en - 1] == '\n') len--;
                 agg++;
-                width = Math.Max(width, line.Length);
-                var tr = line.TrimStart();
-                if (agg == 1) comment = tr.Length > 0 && (tr.StartsWith("//") || tr.StartsWith("#") || tr.StartsWith("--") || tr.StartsWith("/*"));
+                if (len > width) width = len;
+                if (agg == 1 && len > 0)
+                {
+                    int k = st;
+                    while (k < en && (t[k] == ' ' || t[k] == '\t')) k++;
+                    int pl = en - k;
+                    comment = pl >= 2 && t[k] == '/' && (t[k + 1] == '/' || t[k + 1] == '*')
+                              || pl >= 1 && t[k] == '#'
+                              || pl >= 2 && t[k] == '-' && t[k + 1] == '-';
+                }
 
-                if (agg == step || i == lines.Length - 1)
+                if (agg == step || li == total - 1)
                 {
                     if (width > 0)
                     {
@@ -611,7 +660,7 @@ public sealed class CodeEditor : Grid
                             RadiusX = 1, RadiusY = 1,
                         };
                         Canvas.SetLeft(bar, 4);
-                        Canvas.SetTop(bar, (i / step) * MiniLineH + 0.5);
+                        Canvas.SetTop(bar, (li / step) * MiniLineH + 0.5);
                         _minimap.Children.Add(bar);
                     }
                     agg = 0; width = 0; comment = false;
@@ -630,8 +679,7 @@ public sealed class CodeEditor : Grid
         {
             if (!ShowMinimap || WordWrap) return;
             var t = _lastRaw;   // 缓存文本：滚动热路径不实时读内核文档
-            int total = 1;
-            foreach (var c in t) if (c == '\n') total++;
+            int total = TotalLines();   // v39.3：行索引缓存，滚动帧零扫描
             var scroll = _rich ? _reScroll : _tbScroll;
             if (scroll is null || scroll.ScrollableHeight <= 0 || _minimap.Children.Count == 0)
             {
@@ -1358,18 +1406,9 @@ public sealed class CodeEditor : Grid
 
     public int SelectionLength => SelLen;
 
-    public int CharCount => RawText.Length;
+    public int CharCount => _lastRaw.Length;   // v39.3：缓存基线，免去按键整篇 COM 拷贝
 
-    public int LineCount
-    {
-        get
-        {
-            var t = RawText;
-            int n = 1;
-            foreach (var ch in t) if (ch == '\n') n++;
-            return n;
-        }
-    }
+    public int LineCount => TotalLines();   // v39.3：走行索引，不再实时读文档全篇扫描
 
     public string SelectedText => SelTextRaw;
 
@@ -1451,12 +1490,18 @@ public sealed class CodeEditor : Grid
         return (pos, end);
     }
 
-    (int line, int col) CaretLC() => CaretLC(RawText);
+    (int line, int col) CaretLC() => CaretLC(_lastRaw);
 
-    /// <summary>带文本入参的版本：滚动热路径传缓存文本，避免实时读内核文档。</summary>
+    /// <summary>带文本入参的版本：滚动热路径传缓存文本，避免实时读内核文档。
+    /// v39.3：t 与基线同引用时走行索引二分（大文件滚动帧零扫描），否则退回逐字扫描。</summary>
     (int line, int col) CaretLC(string t)
     {
         int caret = Math.Min(SelPos, t.Length);
+        if (ReferenceEquals(t, _lastRaw))
+        {
+            int li = LineFromOffset(caret);
+            return (li, caret - _lineStarts![li]);
+        }
         int line = 0, lastNl = -1;
         for (int i = 0; i < caret; i++)
             if (t[i] == '\n') { line++; lastNl = i; }
@@ -1554,6 +1599,7 @@ public sealed class CodeEditor : Grid
             _syncing = true;
             try { RawText = result; }
             finally { _syncing = false; }
+            _lastRaw = RawText;   // v39.3：同步基线，行索引随之重建
             Sel(Math.Min(caret, RawText.Length), 0);
             Modified?.Invoke(this, EventArgs.Empty);
             StatusChanged?.Invoke(this, EventArgs.Empty);
@@ -1600,6 +1646,7 @@ public sealed class CodeEditor : Grid
         _syncing = true;
         try { RawText = f; }
         finally { _syncing = false; }
+        _lastRaw = RawText;   // v39.3：同步基线，行索引随之重建
         HidePopup();
         Sel(Math.Min(caret, f.Length), 0);
         ScheduleRecolor();
@@ -1668,6 +1715,7 @@ public sealed class CodeEditor : Grid
             _syncing = true;
             try { RawText = t; }
             finally { _syncing = false; }
+            _lastRaw = RawText;   // v39.3：同步基线，行索引随之重建
             Sel(Math.Min(caret, t.Length), 0);
             ScheduleRecolor();
             Modified?.Invoke(this, EventArgs.Empty);

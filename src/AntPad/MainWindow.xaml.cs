@@ -256,11 +256,13 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
         {
             var fi = new FileInfo(path);
             if (!fi.Exists) { ShowMessage("无法打开文件", $"文件不存在：{path}"); RemoveFailedDoc(doc); return; }
-            // 超大文件预检：读入和渲染都会卡顿，提前拒绝而不是让界面卡死
+            // 超大文件走只读快看通道（v39.3 老板拍板的分治方案）：
+            // 编辑器管 ≤50MB 可编辑；超限不拒开，弹独立快看窗按屏解码
             if (fi.Length > 50_000_000)
             {
-                ShowMessage("文件过大", $"“{fi.Name}”超过 50MB，暂不支持打开。");
-                RemoveFailedDoc(doc); return;
+                RemoveFailedDoc(doc);   // 先收掉空标签，避免快看窗背后留空白页
+                new Views.HugeFileViewer(path).Activate();
+                return;
             }
             // 读取放后台线程，几 MB 的文件也不占用界面
             byte[] bytes = await Task.Run(() => File.ReadAllBytes(path));
