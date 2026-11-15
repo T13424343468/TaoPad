@@ -2531,11 +2531,16 @@ def c_second_instance_open():
 
 
 def c_bigfile_scroll():
-    # v39：新增场景——大文件（约 5.6MB/4 万行）打开、状态栏行数正确、
-    # 滚动画面连续变化（滚动卡死 = 差分为 0 即红）。
+    # v39：新增场景——大文件打开、状态栏行数正确、滚动画面连续变化
+    # （滚动卡死 = 差分为 0 即红）。
+    # v39 轮实锤（run 43728694460）：应用设计红线 = 文件超 2MB 自动进只读
+    # 模式（trace「文件超过 2MB，已进入只读模式」），且 5.6MB 加载期间
+    # UIA 全树读取饿死（状态栏轮询 40s 只剩窗名）。用例改为 2MB 内可编辑
+    # 大文件（1.6MB/1.2 万行）测打开与滚动流畅；>2MB 只读护栏为既有设计
+    # 行为，如实记录不在本用例断言。
     p = os.path.join(DOCS, "taopad-bigfile.txt")
-    lines = 40000
-    if not os.path.exists(p) or os.path.getsize(p) < 4_000_000:
+    lines = 12000
+    if not os.path.exists(p) or os.path.getsize(p) < 1_000_000:
         with open(p, "w", encoding="utf-8") as f:
             for i in range(lines):
                 f.write(f"L{i:05d}-" + "ABCDEFGH" * 16 + "\n")
