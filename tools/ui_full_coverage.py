@@ -1184,8 +1184,9 @@ def clear_editor_verified(max_rounds=5):
         if i == 0:
             click_editor()
         elif i in (2, 4):
-            # 44145564951 实锤：MENU_INDEX 键带快捷键后缀，裸名=无序号映射空转
-            if menu_xy("编辑", "全选（Ctrl+A）"):
+            # 44145564951 实锤：MENU_INDEX 键带快捷键后缀，裸名=无序号映射空转；
+            # 44149411449 实锤：纯鼠标激活，杜绝 DOWN/ENTER 迟到落进编辑器
+            if menu_click_mouse("编辑", "全选（Ctrl+A）"):
                 send_keys("{DELETE}")
                 time.sleep(0.8)
         else:
@@ -1210,7 +1211,7 @@ def paste_verified(payload, max_rounds=4):
             click_editor()
         elif i == 2:
             pyperclip.copy(payload)
-            menu_xy("编辑", "粘贴（Ctrl+V）")
+            menu_click_mouse("编辑", "粘贴（Ctrl+V）")
         else:
             focus_main()
             click_editor()
@@ -1228,6 +1229,71 @@ def editor_open_clean():
     focus_main()
     click_editor()
     return clear_editor_verified()
+
+
+def menu_click_mouse(top, item):
+    """纯鼠标激活菜单项：顶级布局点击→弹层差分+行带→直点目标项坐标。
+    44149411449 实锤：menu_xy 通道一的 DOWN×idx+ENTER 在弹层收层、焦点
+    回编辑器后才落账，迟到 ENTER 恰好砸在后续粘贴之后（X07 文本尾反复
+    多出 \\r\\n、弹层被收）。本函数全程无键盘，供清场/粘贴/X07/X09 使用。"""
+    tops = ["文件", "编辑", "搜索", "查看", "语言", "编码", "主题", "工具"]
+    if top not in tops:
+        return False
+    for attempt in range(3):
+        esc_cleanup()
+        focus_main()
+        try:
+            import win32gui
+            l, t, _r, _b = win32gui.GetWindowRect(WIN_HANDLE)
+        except Exception:
+            return False
+        tc = l + TOP_MENU_XY[top][0]
+        pre = grab_img()
+        if not _click_top_by_layout(top):
+            return False
+        post = grab_img()
+        strip = (tc - 8, t + 82, tc + 100, t + 510)
+        d = _region_diff(pre, post, strip)
+        bands = _ink_bands(post, strip[0], strip[2], strip[1], strip[3])
+        if d < 0.002 or not bands:
+            time.sleep(0.8)
+            post = grab_img()
+            d = _region_diff(pre, post, strip)
+            bands = _ink_bands(post, strip[0], strip[2], strip[1], strip[3])
+        if d < 0.002 or not bands:
+            print(f"menu_click_mouse[{top}] 第{attempt+1}次顶级弹层未开", flush=True)
+            continue
+        idx = MENU_INDEX.get(top, {}).get(item)
+        if idx is None and top == "语言" and item in LANGS:
+            idx = LANGS.index(item)
+        if idx is None:
+            print(f"menu_click_mouse[{top}>{item}] 无序号映射", flush=True)
+            esc_cleanup()
+            return False
+        mark = trace_mark()
+        band = _pick_band(bands, idx, t + 95.5 + 31.7 * idx)
+        if not band:
+            esc_cleanup()
+            continue
+        _click_xy(band[2] + 10, band[0])
+        ok = _trace_wait_item(mark, item, wait=1.2)
+        if ok:
+            esc_cleanup()
+            return True
+        print(f"menu_click_mouse[{top}>{item}] 第{attempt+1}次直点无回执", flush=True)
+        esc_cleanup()
+    return False
+
+
+def clear_editor_settled(max_retries=3):
+    """清场后等迟到键落完再复核：menu 激活的 ENTER 迟到 1~2.5s 落进编辑器，
+    清完立刻粘贴会把 ENTER 一起带进新正文（X07 文本尾尾随 CRLF 实锤）。"""
+    for _ in range(max_retries):
+        if clear_editor_verified():
+            time.sleep(2.0)
+            if _norm_text(_hook_doc_safe().get("text", "")).strip() == "":
+                return True
+    return False
 
 
 def editor_clipboard():
@@ -1477,9 +1543,9 @@ def c_csharp_completion():
     """X07：C# 全量智能补全（1.1.0）——词表先弹、Roslyn 合并，
     弹层候选走 completionItems 硬通道，断言语义成员（Add/Count）可达。"""
     editor_open_clean()
-    menu_xy("语言", "C#")
+    menu_click_mouse("语言", "C#")
     time.sleep(0.6)
-    clear_editor_verified()
+    clear_editor_settled()
     items = []
     doc = {}
     for round_i in range(2):
@@ -1500,7 +1566,7 @@ def c_csharp_completion():
         t = _norm_text(doc.get("text", ""))
         print(f"X07: 第{round_i + 1}轮候选缺语义成员，清场重输: "
               f"items={items[:8]!r} 文本尾={t[-20:]!r}", flush=True)
-        clear_editor_verified()
+        clear_editor_settled()
     assert "Add" in items and "Count" in items, (
         f"X07: 补全弹层候选缺语义成员: {items[:12]!r} 诊断={doc.get('completionDebug','')!r}"
         f" 文本尾={doc.get('text','')[-24:]!r}")
@@ -1550,26 +1616,33 @@ def c_pair_comment_undo():
     """X09：括号配对/注释后的单步撤销（1.1.1）——配对插入是单撤销组，
     一步 Ctrl+Z 退净；注释命令走 BeginUndoGroup 同样一步退净。"""
     editor_open_clean()
-    menu_xy("语言", "C#")
+    menu_click_mouse("语言", "C#")
     time.sleep(0.6)
-    clear_editor_verified()
-    # 44145564951 实锤：+9 配对触发后钩子读慢一拍会多发一次 → '(()'。
-    # 以「正文恰为 ()」为发送条件；非空但不是 () 时等一拍再判，仍不是才清场重发。
-    for i in range(4):
+    clear_editor_settled()
+    # 44141628790 定谳：TryAutoPair 只挂按键链（CodeEditor 按键处理），
+    # 粘贴永不触发配对——type_text("(") 出 "(" 是场景设计错，改真实按键。
+    # pywinauto 把 ( 解析为修饰键分组符（KeySequenceError 实锤）；产品判定
+    # Shift+Number9（CodeEditor.cs 2476），US 布局发 +9 即命中同一虚拟键路径。
+    # 44149411449 实锤：+9 落账慢于钩子读会双发（'(()'）——发后等足再判，
+    # 非空不是 () 就清场重来，绝不连发。
+    for i in range(5):
         doc = _hook_doc_safe()
-        if doc.get("text", "").strip() == "()":
+        t = doc.get("text", "").strip()
+        if t == "()":
             break
-        if doc.get("text", "").strip():
-            time.sleep(1.2)
-            doc = _hook_doc_safe()
-            if doc.get("text", "").strip() == "()":
+        if t:
+            # 非空但不是 ()：等一拍（迟到键/慢落账）再判
+            time.sleep(1.5)
+            t = _hook_doc_safe().get("text", "").strip()
+            if t == "()":
                 break
-            clear_editor_verified()
+            clear_editor_settled()
+            continue
         if i:
             focus_main()
         click_editor()
         send_keys("+9")
-        time.sleep(1.2)
+        time.sleep(2.0)
     doc = _hook_doc_safe()
     assert doc.get("text", "").strip() == "()", f"X09: 配对插入不对: {doc.get('text', '')[-20:]!r}"
     for i in range(3):
