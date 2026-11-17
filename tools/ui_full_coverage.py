@@ -1175,42 +1175,58 @@ def _hook_doc_safe():
     return docs[act] if 0 <= act < len(docs) else docs[-1]
 
 
-def clear_editor_verified(max_rounds=4):
+def clear_editor_verified(max_rounds=5):
     """44137602413 实锤：X06 起 ^a{DEL} 连续被吞（X05 残留原样带到 X06），
     同班 X03/X04 却 PASS——吞键集中在会话后段。清场必须以钩子正文为证，
-    没清干净就换姿势重试，不带残留进下一个场景。"""
+    没清干净就换姿势重试；第 3/5 轮改编辑>全选菜单（鼠标通道）兜底，
+    不带残留进下一个场景。"""
     for i in range(max_rounds):
-        if i:
+        if i == 0:
+            click_editor()
+        elif i in (2, 4):
+            if menu_xy("编辑", "全选"):
+                send_keys("{DELETE}")
+                time.sleep(0.8)
+        else:
             focus_main()
-        click_editor()
+            click_editor()
         send_keys("^a{DEL}")
-        time.sleep(0.6)
-        if _norm_text(_hook_doc_safe().get("text", "")).strip() == "":
-            return True
-        # 换姿势：^a 全选后单独 DELETE
-        send_keys("^a")
-        time.sleep(0.25)
-        send_keys("{DELETE}")
         time.sleep(0.6)
         if _norm_text(_hook_doc_safe().get("text", "")).strip() == "":
             return True
     return False
 
 
-def paste_verified(payload, max_rounds=3):
+def paste_verified(payload, max_rounds=4):
     """44137602413 实锤：X06 两轮粘贴全吞、X07 粘贴其实进了——粘贴必须
-    以钩子正文含 payload 为证，没进就聚焦重粘，进了绝不重粘（防双份）。"""
+    以钩子正文含 payload 为证，没进就聚焦重粘；第 3 轮改编辑>粘贴菜单
+    （鼠标通道，App 直投编辑器不依赖键盘焦点），进了绝不重粘防双份。"""
     for i in range(max_rounds):
         t = _norm_text(_hook_doc_safe().get("text", ""))
         if payload in t:
             return t
-        if i:
+        if i == 0:
+            click_editor()
+        elif i == 2:
+            pyperclip.copy(payload)
+            menu_xy("编辑", "粘贴")
+        else:
             focus_main()
-        click_editor()
-        pyperclip.copy(payload)
-        send_keys("^v")
-        time.sleep(0.8)
+            click_editor()
+        if i != 2:
+            pyperclip.copy(payload)
+            send_keys("^v")
+        time.sleep(0.9)
     return _norm_text(_hook_doc_safe().get("text", ""))
+
+
+def editor_open_clean():
+    """场景开工：收浮层→窗口置前→点编辑区→验证式清场。X05 收尾的面板/
+    浮层残留（toggle 失败实锤）会把 X06 的点击和输入全部引走。"""
+    esc_cleanup()
+    focus_main()
+    click_editor()
+    return clear_editor_verified()
 
 
 def editor_clipboard():
@@ -1440,7 +1456,7 @@ def c_writing_panels():
 def c_fountain_highlight():
     """X06：Fountain 剧本高亮（1.1.0）——场景/人物/转场分词落位，
     状态栏语言与正文以测试钩子为证。"""
-    clear_editor_verified()
+    editor_open_clean()
     menu_xy("语言", "Fountain 剧本")
     time.sleep(0.6)
     clear_editor_verified()
@@ -1459,7 +1475,7 @@ def c_fountain_highlight():
 def c_csharp_completion():
     """X07：C# 全量智能补全（1.1.0）——词表先弹、Roslyn 合并，
     弹层候选走 completionItems 硬通道，断言语义成员（Add/Count）可达。"""
-    clear_editor_verified()
+    editor_open_clean()
     menu_xy("语言", "C#")
     time.sleep(0.6)
     clear_editor_verified()
@@ -1472,9 +1488,19 @@ def c_csharp_completion():
         items = doc.get("completionItems") or []
         if "Add" in items and "Count" in items:
             break
-        # 44137602413 实锤：menu_xy 被吞的 ENTER 迟到落地（文本尾多出 \r\n），
-        # 光标被推走导致 Roslyn 续弹放弃。清干净重输一轮再验。
-        print(f"X07: 第{round_i + 1}轮候选缺语义成员，清场重输: items={items[:8]!r}", flush=True)
+        # 44141628790 实锤：迟到 ENTER 落在 list. 后（文本尾多 \r\n），光标
+        # 被推走、弹层被收。退格把光标请回 list. 后，TextChanged 重触发弹层。
+        t = _norm_text(doc.get("text", ""))
+        if t.endswith("list.\r") or t.endswith("list.\n"):
+            click_editor()
+            send_keys("{BACKSPACE}")
+            time.sleep(1.5)
+            doc = _hook_doc_safe()
+            items = doc.get("completionItems") or []
+            if "Add" in items and "Count" in items:
+                break
+        print(f"X07: 第{round_i + 1}轮候选缺语义成员，清场重输: "
+              f"items={items[:8]!r} 文本尾={t[-20:]!r}", flush=True)
         clear_editor_verified()
     assert "Add" in items and "Count" in items, (
         f"X07: 补全弹层候选缺语义成员: {items[:12]!r} 诊断={doc.get('completionDebug','')!r}"
@@ -1524,13 +1550,14 @@ def c_csharp_undo():
 def c_pair_comment_undo():
     """X09：括号配对/注释后的单步撤销（1.1.1）——配对插入是单撤销组，
     一步 Ctrl+Z 退净；注释命令走 BeginUndoGroup 同样一步退净。"""
-    clear_editor_verified()
+    editor_open_clean()
     menu_xy("语言", "C#")
     time.sleep(0.6)
     clear_editor_verified()
-    # 44137602413 定谳：TryAutoPair 只挂按键链（CodeEditor 按键处理），
-    # 粘贴永不触发配对——type_text("(") 出 "(" 是场景设计错，改真实按键
-    # 并以钩子正文为证重试。
+    # 44141628790 定谳：TryAutoPair 只挂按键链（CodeEditor 按键处理），
+    # 粘贴永不触发配对——type_text("(") 出 "(" 是场景设计错，改真实按键。
+    # pywinauto 把 ( 解析为修饰键分组符（KeySequenceError 实锤）；产品判定
+    # Shift+Number9（CodeEditor.cs 2476），US 布局发 +9 即命中同一虚拟键路径。
     for i in range(4):
         doc = _hook_doc_safe()
         if "(" in doc.get("text", ""):
@@ -1538,7 +1565,7 @@ def c_pair_comment_undo():
         if i:
             focus_main()
         click_editor()
-        send_keys("(")
+        send_keys("+9")
         time.sleep(0.6)
     doc = _hook_doc_safe()
     assert doc.get("text", "").strip() == "()", f"X09: 配对插入不对: {doc.get('text', '')[-20:]!r}"
