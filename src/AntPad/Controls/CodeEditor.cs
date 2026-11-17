@@ -1997,7 +1997,17 @@ public sealed class CodeEditor : Grid
             if (word.Length > 0)
                 items = _items.Where(x => x.StartsWith(word, StringComparison.Ordinal)).ToList();
         }
-        if (items.Count == 0 || items.Count > 200) { if (_popup.IsOpen) HidePopup(); return; }
+        if (items.Count == 0 || items.Count > 200)
+        {
+            if (_popup.IsOpen) HidePopup();
+            // 语义级补全在词表无候选时也照走：成员补全（如 list. 后）词表本来就空，
+            // 两段式的第二段不能被第一段的空候选吞掉（run 44096504055 X07 实锤）
+            if (_lang.Id == "csharp" && items.Count == 0)
+            {
+                _ = EnrichWithRoslynAsync(t, caret);
+            }
+            return;
+        }
         // 唯一候选就是已输入的词 → 没有可补的内容，不弹（VS 同款行为）
         if (items.Count == 1 && items[0] == CurrentWordPrefix(t, caret))
         { if (_popup.IsOpen) HidePopup(); return; }

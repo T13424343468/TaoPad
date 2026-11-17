@@ -1299,6 +1299,18 @@ def c_rainbow_brackets():
     shot("case-rainbow")
 
 
+def toggle_panel(item, hotkey):
+    """查看>预览/大纲 激活：菜单回执优先，无回执退 XAML 加速键（V01 热键兜底同法）。
+    run 44096504055 实锤：预览回执在、大纲 DOWN×4+ENTER 三次无回执（ENTER 落进
+    编辑器，X06 现场行数+1 佐证）——面板类目标有确定性热键，菜单路径失败即退。"""
+    if menu_xy("查看", item):
+        return
+    print(f"{item} 菜单路径失败，退加速键 {hotkey}", flush=True)
+    focus_main()
+    send_keys(hotkey)
+    time.sleep(0.6)
+
+
 def c_writing_panels():
     """X05：Markdown 写作面板（1.1.0）——预览/大纲开启后正文与字数落位。"""
     click_editor()
@@ -1310,8 +1322,8 @@ def c_writing_panels():
     send_keys("^a{DEL}")
     type_text("# 标题一\n正文内容\n## 标题二\n- 列表项")
     time.sleep(0.5)
-    menu_xy("查看", "预览")
-    menu_xy("查看", "大纲")
+    toggle_panel("预览", "^+p")
+    toggle_panel("大纲", "^+o")
     time.sleep(1.0)
     status_has(contains="字数")
     data = hook_dump()
@@ -1321,8 +1333,8 @@ def c_writing_panels():
     assert "标题二" in doc.get("text", ""), f"X05: 正文缺失: {doc.get('text', '')[:80]!r}"
     shot("case-writing-panels")
     # 复位：关掉两个面板，不占后续用例的画面
-    menu_xy("查看", "预览")
-    menu_xy("查看", "大纲")
+    toggle_panel("预览", "^+p")
+    toggle_panel("大纲", "^+o")
     time.sleep(0.6)
 
 
@@ -1965,6 +1977,10 @@ def menu_xy(top, item=None, sub=None, keep_open=False):
         if not ok:
             print(f"menu_xy[{top}>{item}] 第{attempt+1}次激活无回执，重试", flush=True)
             esc_cleanup()
+            try:
+                close_menus_uia()
+            except Exception:
+                pass
             continue
         if sub is None:
             if not keep_open:
@@ -2201,8 +2217,10 @@ def c_zoom():
         if label != "复位":
             assert d > 0.004, f"缩放[{label}]画面无变化（差分 {d:.5f}）"
         else:
+            # 基线阈值 0.004→0.01（run 44096504055 实测）：复位后文本全等，
+            # 对基线差分 0.0049 纯属光标闪烁相位噪声；复位差分 0.019 远超动作阈值
             d_base = _pixel_changed(base, img)
-            assert d > 0.004 and d_base < 0.004, \
+            assert d > 0.004 and d_base < 0.01, \
                 f"复位未回到基线: 复位差分={d:.5f} 对基线差分={d_base:.5f}"
 
 

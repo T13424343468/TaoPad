@@ -157,8 +157,16 @@
         </MenuFlyoutSubItem>
         <MenuFlyoutSeparator/>
         <!-- 预览/大纲仅文章语言（Markdown/Fountain）可用，普通语言下隐藏 -->
-        <ToggleMenuFlyoutItem x:Name="PreviewToggle" Text="预览" Click="OnPreviewToggle"/>
-        <ToggleMenuFlyoutItem x:Name="OutlineToggle" Text="大纲" Click="OnOutlineToggle"/>
+        <ToggleMenuFlyoutItem x:Name="PreviewToggle" Text="预览" Click="OnPreviewToggle">
+          <ToggleMenuFlyoutItem.KeyboardAccelerators>
+            <KeyboardAccelerator Modifiers="Control,Shift" Key="P"/>
+          </ToggleMenuFlyoutItem.KeyboardAccelerators>
+        </ToggleMenuFlyoutItem>
+        <ToggleMenuFlyoutItem x:Name="OutlineToggle" Text="大纲" Click="OnOutlineToggle">
+          <ToggleMenuFlyoutItem.KeyboardAccelerators>
+            <KeyboardAccelerator Modifiers="Control,Shift" Key="O"/>
+          </ToggleMenuFlyoutItem.KeyboardAccelerators>
+        </ToggleMenuFlyoutItem>
       </MenuBarItem>
 
       <!-- 语言菜单：项与文案全部来自 LangDef.All 唯一清单，构造时动态生成
