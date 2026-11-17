@@ -1042,7 +1042,7 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
     }
 
     /// <summary>界面展示用版本号；与安装包文件名保持一致。</summary>
-    public const string AppVersion = "1.1.0";
+    public const string AppVersion = "1.1.1";
 
     /// <summary>
     /// 测试钩子快照（2026-11-17 老板令）：把当前全部标签的正文与状态

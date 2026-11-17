@@ -1256,7 +1256,7 @@ def c_testhook_dump():
     send_keys("^a{DEL}")
     type_text("X03HOOK-正文自报-987654321")
     data = hook_dump()
-    assert data.get("version") == "1.1.0", f"版本不符: {data.get('version')!r}"
+    assert data.get("version") == "1.1.1", f"版本不符: {data.get('version')!r}"
     docs = data.get("docs") or []
     assert docs, "导出快照里没有文档"
     active = data.get("active", -1)
