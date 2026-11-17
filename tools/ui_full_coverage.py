@@ -1184,7 +1184,8 @@ def clear_editor_verified(max_rounds=5):
         if i == 0:
             click_editor()
         elif i in (2, 4):
-            if menu_xy("编辑", "全选"):
+            # 44145564951 实锤：MENU_INDEX 键带快捷键后缀，裸名=无序号映射空转
+            if menu_xy("编辑", "全选（Ctrl+A）"):
                 send_keys("{DELETE}")
                 time.sleep(0.8)
         else:
@@ -1209,7 +1210,7 @@ def paste_verified(payload, max_rounds=4):
             click_editor()
         elif i == 2:
             pyperclip.copy(payload)
-            menu_xy("编辑", "粘贴")
+            menu_xy("编辑", "粘贴（Ctrl+V）")
         else:
             focus_main()
             click_editor()
@@ -1483,22 +1484,20 @@ def c_csharp_completion():
     doc = {}
     for round_i in range(2):
         paste_verified("var list = new List<string>();\nlist.")
-        time.sleep(2.5)   # 两段式：词表先弹，Roslyn 后台合并需一拍
-        doc = _hook_doc_safe()
-        items = doc.get("completionItems") or []
-        if "Add" in items and "Count" in items:
-            break
-        # 44141628790 实锤：迟到 ENTER 落在 list. 后（文本尾多 \r\n），光标
-        # 被推走、弹层被收。退格把光标请回 list. 后，TextChanged 重触发弹层。
-        t = _norm_text(doc.get("text", ""))
-        if t.endswith("list.\r") or t.endswith("list.\n"):
-            click_editor()
-            send_keys("{BACKSPACE}")
-            time.sleep(1.5)
+        # 44145564951 实锤：2.5s 固定等待时词表段先弹（items=['List']），Roslyn
+        # 语义合并（冷启动加载分析器）在云 VM 上远不止一拍——轮询等合并完成
+        deadline = time.time() + 25
+        doc = {}
+        items = []
+        while time.time() < deadline:
             doc = _hook_doc_safe()
             items = doc.get("completionItems") or []
             if "Add" in items and "Count" in items:
                 break
+            time.sleep(2.5)
+        if "Add" in items and "Count" in items:
+            break
+        t = _norm_text(doc.get("text", ""))
         print(f"X07: 第{round_i + 1}轮候选缺语义成员，清场重输: "
               f"items={items[:8]!r} 文本尾={t[-20:]!r}", flush=True)
         clear_editor_verified()
@@ -1554,19 +1553,23 @@ def c_pair_comment_undo():
     menu_xy("语言", "C#")
     time.sleep(0.6)
     clear_editor_verified()
-    # 44141628790 定谳：TryAutoPair 只挂按键链（CodeEditor 按键处理），
-    # 粘贴永不触发配对——type_text("(") 出 "(" 是场景设计错，改真实按键。
-    # pywinauto 把 ( 解析为修饰键分组符（KeySequenceError 实锤）；产品判定
-    # Shift+Number9（CodeEditor.cs 2476），US 布局发 +9 即命中同一虚拟键路径。
+    # 44145564951 实锤：+9 配对触发后钩子读慢一拍会多发一次 → '(()'。
+    # 以「正文恰为 ()」为发送条件；非空但不是 () 时等一拍再判，仍不是才清场重发。
     for i in range(4):
         doc = _hook_doc_safe()
-        if "(" in doc.get("text", ""):
+        if doc.get("text", "").strip() == "()":
             break
+        if doc.get("text", "").strip():
+            time.sleep(1.2)
+            doc = _hook_doc_safe()
+            if doc.get("text", "").strip() == "()":
+                break
+            clear_editor_verified()
         if i:
             focus_main()
         click_editor()
         send_keys("+9")
-        time.sleep(0.6)
+        time.sleep(1.2)
     doc = _hook_doc_safe()
     assert doc.get("text", "").strip() == "()", f"X09: 配对插入不对: {doc.get('text', '')[-20:]!r}"
     for i in range(3):
