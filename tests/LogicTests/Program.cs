@@ -461,6 +461,58 @@ var sample = "中文sample";
         items is null ? "null" : string.Join(",", items.Select(i => i.Text).Take(10)));
 }
 
+// ================= 9. 撤销步进计划（1.1.1 审查修复，5 项） =================
+// 背景：富内核里着色/彩虹括号格式批进撤销流，原生一步只退格式不退文字。
+// UndoStepper 连续步进直到文字真变——此处用委托模拟"格式步/文字步"序列。
+
+// U01 连续格式步后一步文字步：跨过格式步、停在文字变化
+{
+    // 撤销流（从新到旧）：[着色批][着色批][真实文字]，执行 Undo 依次回退
+    var units = new Stack<string>(new[] { "format2", "format1", "text" });
+    string Apply()
+    {
+        var u = units.Pop();
+        return u == "text" ? "old" : "cur";
+    }
+    var (steps, changed) = UndoStepper.Run(64, "cur",
+        current: () => units.Count == 0 ? "old" : (units.Peek() == "text" ? "cur" : "cur"),
+        step: () => Apply(),
+        canStep: () => units.Count > 0);
+    Check("U01 格式步跨过后停在文字变化", changed && steps == 3, $"steps={steps} changed={changed}");
+}
+
+// U02 首步就是文字步：一步即停
+{
+    var (steps, changed) = UndoStepper.Run(64, "cur",
+        current: () => "old", step: () => { }, canStep: () => true);
+    Check("U02 首步即文字步", changed && steps == 1, $"steps={steps} changed={changed}");
+}
+
+// U03 上限防呆：全是格式步时步进耗尽也不无限循环
+{
+    int calls = 0;
+    var (steps, changed) = UndoStepper.Run(64, "cur",
+        current: () => "cur", step: () => calls++, canStep: () => true);
+    Check("U03 步进上限防呆", !changed && steps == 64 && calls == 64, $"steps={steps} calls={calls}");
+}
+
+// U04 流尽：无可步进单元时立即返回零步
+{
+    var (steps, changed) = UndoStepper.Run(64, "cur",
+        current: () => "cur", step: () => { }, canStep: () => false);
+    Check("U04 流尽返回零步", !changed && steps == 0, $"steps={steps} changed={changed}");
+}
+
+// U05 重做对称：注入 Redo 委托同法工作
+{
+    int done = 0;
+    var (steps, changed) = UndoStepper.Run(64, "cur",
+        current: () => done == 0 ? "cur" : "new",
+        step: () => done++,
+        canStep: () => done < 1);
+    Check("U05 重做方向对称", changed && steps == 1, $"steps={steps} changed={changed}");
+}
+
 // ================= 汇总 =================
 
 Console.WriteLine($"==== 逻辑回归汇总：{pass} 通过 / {fail} 失败 ====");

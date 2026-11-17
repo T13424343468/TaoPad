@@ -25,6 +25,7 @@
     <Compile Include="../../src/AntPad/Services/TaoPaths.cs" />
     <Compile Include="../../src/AntPad/Services/WritingDoc.cs" />
     <Compile Include="../../src/AntPad/Services/CSharpIntel.cs" />
+    <Compile Include="../../src/AntPad/Services/UndoStepper.cs" />
     <Compile Include="Program.cs" />
   </ItemGroup>
 

@@ -1497,14 +1497,36 @@ public sealed class CodeEditor : Grid
 
     public void Undo()
     {
-        if (_rich) { try { if (_re.Document?.CanUndo() == true) { _re.Document.Undo(); MarkFormatsDirty(); } } catch { } }
+        if (_rich) { UndoRedoRich(undo: true); }
         else if (_tb.CanUndo) _tb.Undo();
     }
 
     public void Redo()
     {
-        if (_rich) { try { if (_re.Document?.CanRedo() == true) { _re.Document.Redo(); MarkFormatsDirty(); } } catch { } }
+        if (_rich) { UndoRedoRich(undo: false); }
         else if (_tb.CanRedo) _tb.Redo();
+    }
+
+    /// <summary>富内核撤销/重做（v1.1.1 审查修复）：着色/彩虹括号等格式批
+    /// 也在撤销流里，原生一步只退一批格式、文字不动，用户感知就是
+    /// "Ctrl+Z 没反应"。这里连续步进直到文字真正变化（或流尽），再置脏
+    /// 强制重着色——被恢复的文字立即按当前语言重新上色，旧格式不留。</summary>
+    void UndoRedoRich(bool undo)
+    {
+        try
+        {
+            if (_re.Document is not { } doc) return;
+            if (undo ? !doc.CanUndo() : !doc.CanRedo()) return;
+            _echo = '\0'; _echoAt = -1;
+            var before = RawText;
+            // 着色批已合并为单个撤销组，正常一步就跨完；上限 64 步纯防呆
+            UndoStepper.Run(64, before,
+                current: () => RawText,
+                step: undo ? (Action)(() => doc.Undo()) : () => doc.Redo(),
+                canStep: undo ? (Func<bool>)(() => doc.CanUndo()) : () => doc.CanRedo());
+            MarkFormatsDirty();
+        }
+        catch { /* 撤销失败不致命，保持现状 */ }
     }
 
     /// <summary>撤销/重做会原样恢复字符格式（含旧主题背景色等历史格式），
@@ -1795,6 +1817,26 @@ public sealed class CodeEditor : Grid
         try
         {
             if (_re.Document is not { } doc) return;
+            // v1.1.1 审查修复：整批格式改动合并为一个撤销组。格式改动本就
+            // 进撤销流（撤销会恢复旧字符格式），不合并时每段着色各占一步，
+            // Ctrl+Z 得连按多次才退到真实文字——就是"撤销快捷键有问题"的根因
+            doc.BeginUndoGroup();
+            try
+            {
+                RecolorPaintAll(doc);
+            }
+            finally { doc.EndUndoGroup(); }
+        }
+        catch { /* 着色失败不影响编辑，下次文本变化时重试 */ }
+        finally { _syncing = false; }
+    }
+
+    /// <summary>重着色的全部落笔动作（默认色复位、分词上色、彩虹括号、
+    /// 列块重亮、括号匹配恢复）。由 Recolor 在单个撤销组内调用。</summary>
+    void RecolorPaintAll(Microsoft.UI.Text.ITextDocument doc)
+    {
+        try
+        {
             var text = RawText;
             // 幂等保证：文本没变说明上次已着好色，格式化都不做，
             // 杜绝任何"着色→事件→再着色"的循环
@@ -1854,8 +1896,7 @@ public sealed class CodeEditor : Grid
             _hlA = _hlB = -1;       // 重着色清掉了括号高亮，位置作废
             UpdateBracketMatch();   // 重着色后立即恢复括号高亮（此时 _syncing=true，无事件重入）
         }
-        catch { /* 着色失败不影响编辑，下次文本变化时重试 */ }
-        finally { _syncing = false; }
+        catch { /* 单次落笔失败不影响整体，下次文本变化时重试 */ }
     }
 
     string _lastColorText = "";
@@ -2578,6 +2619,21 @@ public sealed class CodeEditor : Grid
                 e.Handled = true;
                 return;
             }
+        }
+
+        // v1.1.1 审查修复：撤销/重做统一走自家 Undo/Redo——富内核里着色批
+        // 也在撤销流，原生一步只退格式不退文字，必须连续步进到文字真变
+        if (_ctrlDown && !e.KeyStatus.IsMenuKeyDown &&
+            (e.Key == Windows.System.VirtualKey.Z || e.Key == Windows.System.VirtualKey.Y))
+        {
+            e.Handled = true;
+            HidePopup();
+            HideHint();
+            // Ctrl+Z / Ctrl+Shift+Z 撤销重做按 VS 语义；单独 Ctrl+Y 恒为重做
+            bool isRedo = e.Key == Windows.System.VirtualKey.Y ||
+                          (e.Key == Windows.System.VirtualKey.Z && _shiftDown);
+            if (isRedo) Redo(); else Undo();
+            return;
         }
 
         // Ctrl+D 复制当前行；Alt+↑/↓ 上下移动当前行（与"编辑→行操作"菜单同款）

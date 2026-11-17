@@ -1397,6 +1397,62 @@ def c_csharp_completion():
     esc_cleanup()
 
 
+def c_csharp_undo():
+    """X08：C# 模式撤销一步到位（1.1.1）——着色批合并为单个撤销组后，
+    Ctrl+Z 一次就退回文字，不再被格式步吃掉首按；重做对称。"""
+    click_editor()
+    esc_cleanup()
+    send_keys("^a{DEL}")
+    menu_xy("语言", "C#")
+    time.sleep(0.6)
+    click_editor()
+    send_keys("^a{DEL}")
+    type_text("int undoProbe = 42;\n")
+    time.sleep(0.8)   # 等 220ms 防抖着色批完整落盘（含撤销组）
+    send_keys("^z")
+    time.sleep(0.6)
+    data = hook_dump()
+    docs = data.get("docs") or []
+    act = data.get("active", -1)
+    doc = docs[act] if 0 <= act < len(docs) else docs[-1]
+    text = doc.get("text", "")
+    assert "undoProbe" not in text, f"X08: 一次 Ctrl+Z 未退回文字: {text[-40:]!r}"
+    send_keys("^y")
+    time.sleep(0.6)
+    data = hook_dump()
+    docs = data.get("docs") or []
+    doc = docs[data.get("active", -1) if 0 <= data.get("active", -1) < len(docs) else len(docs) - 1]
+    assert "undoProbe" in doc.get("text", ""), f"X08: 重做未恢复文字: {doc.get('text', '')[-40:]!r}"
+    shot("case-csharp-undo")
+    esc_cleanup()
+
+
+def c_pair_comment_undo():
+    """X09：括号配对/注释后的单步撤销（1.1.1）——配对插入是单撤销组，
+    一步 Ctrl+Z 退净；注释命令走 BeginUndoGroup 同样一步退净。"""
+    click_editor()
+    esc_cleanup()
+    send_keys("^a{DEL}")
+    menu_xy("语言", "C#")
+    time.sleep(0.6)
+    click_editor()
+    send_keys("^a{DEL}")
+    type_text("(")
+    time.sleep(0.5)   # 等配对插入与着色批
+    data = hook_dump()
+    docs = data.get("docs") or []
+    doc = docs[data.get("active", -1) if 0 <= data.get("active", -1) < len(docs) else len(docs) - 1]
+    assert doc.get("text", "").strip() == "()", f"X09: 配对插入不对: {doc.get('text', '')[-20:]!r}"
+    send_keys("^z")
+    time.sleep(0.6)
+    data = hook_dump()
+    docs = data.get("docs") or []
+    doc = docs[data.get("active", -1) if 0 <= data.get("active", -1) < len(docs) else len(docs) - 1]
+    assert doc.get("text", "").strip() == "", f"X09: 配对撤销一步未退净: {doc.get('text', '')[-20:]!r}"
+    shot("case-pair-undo")
+    esc_cleanup()
+
+
 def c_startup():
     status_has(contains="行 1，列 1")
     shot("case-startup")
@@ -2922,6 +2978,8 @@ def main():
         ("X05 Markdown 写作面板", c_writing_panels),
         ("X06 Fountain 剧本高亮", c_fountain_highlight),
         ("X07 C# 语义补全弹层", c_csharp_completion),
+        ("X08 C# 撤销一步到位", c_csharp_undo),
+        ("X09 配对/注释单步撤销", c_pair_comment_undo),
         ("O09 正常退出+崩溃检查", c_exit),
     ]
     part = (sys.argv[1] if len(sys.argv) > 1 else "").upper()
