@@ -11,7 +11,7 @@ namespace AntPad.Views;
 /// 只读旁路——正文永远在编辑器里，本面板只按规则渲染一份映像。
 /// 颜色全部走 ThemeResource（道映设计法：禁内联 hex），字号走 4-8 网格档位。
 /// </summary>
-public sealed class ArticlePreview : Border
+public sealed class ArticlePreview : ContentControl
 {
     readonly ScrollViewer _scroll;
     readonly RichTextBlock _rtb;
@@ -24,7 +24,7 @@ public sealed class ArticlePreview : Border
             TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap,
         };
         _scroll = new ScrollViewer { Content = _rtb };
-        Child = _scroll;
+        Content = _scroll;
         PaintBg();
         ThemeService.ThemeApplied += PaintBg;   // 换肤跟随：字典交换后重涂
     }

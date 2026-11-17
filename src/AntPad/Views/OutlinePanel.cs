@@ -9,7 +9,7 @@ namespace AntPad.Views;
 /// 条目按层级缩进，单击跳到对应行；内容由 MainWindow 用 WritingDoc 抽取后喂入。
 /// 纯展示控件，不含任何文件读写。
 /// </summary>
-public sealed class OutlinePanel : Border
+public sealed class OutlinePanel : ContentControl
 {
     readonly ListView _list;
 
@@ -27,7 +27,7 @@ public sealed class OutlinePanel : Border
         {
             if (e.ClickedItem is OutlineRow r) ItemClicked?.Invoke(r.Line + 1);
         };
-        Child = new ScrollViewer
+        Content = new ScrollViewer
         {
             Content = _list,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
