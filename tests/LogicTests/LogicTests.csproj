@@ -21,7 +21,16 @@
     <Compile Include="../../src/AntPad/Services/CodeFormatter.cs" />
     <Compile Include="../../src/AntPad/Services/CompletionEngine.cs" />
     <Compile Include="../../src/AntPad/Services/EncodingHelper.cs" />
+    <!-- 1.1.0 写作模式与 C# 智能补全纯逻辑件 -->
+    <Compile Include="../../src/AntPad/Services/TaoPaths.cs" />
+    <Compile Include="../../src/AntPad/Services/WritingDoc.cs" />
+    <Compile Include="../../src/AntPad/Services/CSharpIntel.cs" />
     <Compile Include="Program.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- CSharpIntel 的分析引擎（与主工程同版本，net8.0 控制台可直接用） -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" />
   </ItemGroup>
 
 </Project>

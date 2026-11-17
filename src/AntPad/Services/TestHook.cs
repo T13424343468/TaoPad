@@ -27,6 +27,11 @@ public static class TestHook
         [JsonPropertyName("caretLine")] public int CaretLine { get; set; }
         [JsonPropertyName("caretColumn")] public int CaretColumn { get; set; }
         [JsonPropertyName("selectionLength")] public int SelectionLength { get; set; }
+        // 彩虹括号硬通道（1.1.0）：前 64 个括号位的实测渲染色 "pos:R,G,B"，
+        // 云测据此断言嵌套括号至少出现 2 种颜色（X04 用例）
+        [JsonPropertyName("bracketColors")] public List<string> BracketColors { get; set; } = new();
+        // 补全弹层硬通道（1.1.0）：弹层开着时导出候选词，X07 据此断言 C# 语义补全
+        [JsonPropertyName("completionItems")] public List<string> CompletionItems { get; set; } = new();
     }
 
     public sealed class Snapshot

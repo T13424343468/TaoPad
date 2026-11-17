@@ -329,6 +329,138 @@ var sample = "中文sample";
     Check("M04 XML 包裹 <!-- -->", r != null && r.StartsWith("<!--") && r.EndsWith("-->"), r);
 }
 
+// ================= 7. Fountain 剧本（1.1.0，4 项） =================
+
+// W01 场景标题归 Heading
+{
+    var toks = new List<TokenSpan>();
+    Tokenizer.TokenizeDocument(LangDef.Fountain, "INT. COFFEE SHOP - DAY", toks);
+    Check("W01 场景标题归 Heading", toks.Count == 1 && toks[0].Kind == TokKind.Heading, string.Join(";", toks));
+}
+// W02 人物归 Member、> 行归 Control、CUT TO: 不误判人物
+{
+    var text = "INT. DAY\nJOHN\nHello.\n\n> CUT TO: NIGHT";
+    var toks = new List<TokenSpan>();
+    Tokenizer.TokenizeDocument(LangDef.Fountain, text, toks);
+    bool member = toks.Any(t => t.Kind == TokKind.Member && text.Substring(t.Start, t.Length) == "JOHN");
+    bool trans = toks.Any(t => t.Kind == TokKind.Control && text.Substring(t.Start, t.Length) == "> CUT TO: NIGHT");
+    Check("W02 人物/转场分类", member && trans && !toks.Any(t => t.Kind == TokKind.Member && text.Substring(t.Start, t.Length).StartsWith("CUT")), string.Join(";", toks));
+}
+// W03 行内强调（粗/斜/code）
+{
+    var st = new HlState();
+    var toks = new List<TokenSpan>();
+    Tokenizer.Tokenize(LangDef.Fountain, "*斜体* 与 **粗体** 与 `代码`", ref st, toks);
+    Check("W03 行内强调", toks.Count(t => t.Kind == TokKind.Control) == 2 && toks.Any(t => t.Kind == TokKind.String), string.Join(";", toks));
+}
+// W04 .fountain 扩展名映射
+{
+    Check("W04 .fountain 语言映射", ReferenceEquals(LangDef.FromFileName("script.fountain"), LangDef.Fountain));
+}
+
+// ================= 8. 彩虹括号深度图（1.1.0，2 项） =================
+
+// B01 嵌套深度
+{
+    var doc = new List<TokenSpan>();
+    string code = "a(b(c))";
+    Tokenizer.TokenizeDocument(LangDef.CSharp, code, doc);
+    var map = Tokenizer.BracketDepths(code, doc);
+    Check("B01 嵌套括号深度递增",
+        map.TryGetValue(1, out int d1) && d1 == 0 && map.TryGetValue(3, out int d3) && d3 == 1 &&
+        map.TryGetValue(5, out int d5) && d5 == 1 && map.TryGetValue(6, out int d6) && d6 == 0,
+        string.Join(";", map.Select(kv => $"{kv.Key}:{kv.Value}")));
+}
+// B02 字符串内括号不计数
+{
+    var doc = new List<TokenSpan>();
+    string code = "\"a(b)\" (x)";
+    Tokenizer.TokenizeDocument(LangDef.CSharp, code, doc);
+    var map = Tokenizer.BracketDepths(code, doc);
+    Check("B02 字符串内括号排除",
+        map.ContainsKey(7) && map.ContainsKey(9) && map.All(kv => kv.Key is 7 or 9),
+        string.Join(";", map.Select(kv => $"{kv.Key}:{kv.Value}")));
+}
+
+// ================= 9. 写作模式：大纲 / 字数 / 快照（1.1.0，6 项） =================
+
+// O01 Markdown 大纲：跳代码围栏
+{
+    var md = "# 一级\n正文\n```csharp\n# 假标题\n```\n## 二级";
+    var items = WritingDoc.MarkdownOutline(md);
+    Check("O01 Markdown 大纲抽取",
+        items.Count == 2 && items[0].Line == 0 && items[0].Level == 1 && items[1].Line == 5 && items[1].Title == "二级",
+        string.Join(";", items.Select(i => $"{i.Line}:{i.Title}")));
+}
+// O02 Fountain 大纲：场景行
+{
+    var items = WritingDoc.FountainOutline("INT. DAY\n\n台词\n\nEXT. NIGHT");
+    Check("O02 Fountain 大纲抽取",
+        items.Count == 2 && items[0].Line == 0 && items[1].Line == 4,
+        string.Join(";", items.Select(i => $"{i.Line}:{i.Title}")));
+}
+// O03 字数：CJK 按字、西文按词
+{
+    var s = WritingDoc.CountWords("你好 world 123 abc");
+    Check("O03 字数统计口径", s.Words == 5 && s.CjkChars == 2, $"{s.Words}/{s.CjkChars}");
+}
+// O04 字数：空文本
+{
+    var s = WritingDoc.CountWords("");
+    Check("O04 空文本字数为零", s.Words == 0 && s.Chars == 0 && s.Lines == 0, $"{s.Words}/{s.Chars}/{s.Lines}");
+}
+// O05 快照保存与读取（写真实数据根，测试允许）
+{
+    string p = WritingDoc.SaveSnapshot(null, "快照正文测试", DateTimeOffset.Now);
+    string? read = WritingDoc.ReadSnapshot(p);
+    Check("O05 快照保存/读取", read == "快照正文测试", read ?? "null");
+}
+// O06 快照保留上限裁剪
+{
+    for (int i = 0; i < 3; i++)
+        WritingDoc.SaveSnapshot("test-trim.md", $"版本{i}", DateTimeOffset.Now.AddSeconds(i));
+    WritingDoc.TrimSnapshots("test-trim.md", 1);
+    Check("O06 快照裁剪到上限", WritingDoc.ListSnapshots("test-trim.md").Count == 1);
+}
+
+// ================= 10. C# 智能补全（1.1.0，5 项） =================
+
+// G01 var 推断 + 泛型成员补全
+{
+    var text = "using System.Collections.Generic;\nvar list = new List<string>();\nlist.";
+    var items = await CSharpIntel.GetCompletionsAsync(text, text.Length);
+    Check("G01 List<string> 成员补全",
+        items is not null && items.Any(i => i.Text == "Add" && i.Kind == "method") && items.Any(i => i.Text == "Count"),
+        items is null ? "null" : string.Join(",", items.Select(i => i.Text).Take(8)));
+}
+// G02 继承链成员（List→ICollection→IEnumerable→object）
+{
+    var text = "using System.Collections.Generic;\nvar list = new List<int>();\nlist.A";
+    var items = await CSharpIntel.GetCompletionsAsync(text, text.Length);
+    Check("G02 继承链成员可达", items is not null && items.Any(i => i.Text == "Add") && items.Any(i => i.Text == "CopyTo"),
+        items is null ? "null" : string.Join(",", items.Select(i => i.Text).Take(8)));
+}
+// G03 = 号后补上下文：作用域符号可见
+{
+    var text = "int x = 1;\nint y = ";
+    var items = await CSharpIntel.GetCompletionsAsync(text, text.Length);
+    Check("G03 = 后作用域符号", items is not null && items.Any(i => i.Text == "x"),
+        items is null ? "null" : string.Join(",", items.Select(i => i.Text).Take(10)));
+}
+// G04 普通位置无候选（返回 null 不误弹）
+{
+    var text = "int x = 1;";
+    var items = await CSharpIntel.GetCompletionsAsync(text, text.Length);
+    Check("G04 普通位置不弹层", items is null);
+}
+// G05 枚举类型成员（DayOfWeek.Monday 等静态枚举值）
+{
+    var text = "System.DayOfWeek d = System.DayOfWeek.";
+    var items = await CSharpIntel.GetCompletionsAsync(text, text.Length);
+    Check("G05 枚举成员补全", items is not null && items.Any(i => i.Text == "Monday"),
+        items is null ? "null" : string.Join(",", items.Select(i => i.Text).Take(10)));
+}
+
 // ================= 汇总 =================
 
 Console.WriteLine($"==== 逻辑回归汇总：{pass} 通过 / {fail} 失败 ====");

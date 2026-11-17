@@ -28,6 +28,9 @@ jobs:
       - name: 还原依赖
         run: dotnet restore src/AntPad/AntPad.csproj
 
+      - name: 纯逻辑回归（LogicTests，红即停）
+        run: dotnet run --project tests/LogicTests -c Release
+
       - name: 云端 Windows 编译（Release x64 自包含）
         run: >
           dotnet publish src/AntPad/AntPad.csproj -c Release -r win-x64

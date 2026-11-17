@@ -1256,7 +1256,7 @@ def c_testhook_dump():
     send_keys("^a{DEL}")
     type_text("X03HOOK-正文自报-987654321")
     data = hook_dump()
-    assert data.get("version") == "1.0.11", f"版本不符: {data.get('version')!r}"
+    assert data.get("version") == "1.1.0", f"版本不符: {data.get('version')!r}"
     docs = data.get("docs") or []
     assert docs, "导出快照里没有文档"
     active = data.get("active", -1)
@@ -1270,6 +1270,103 @@ def c_testhook_dump():
     text2 = docs2[active].get("text", "") if docs2 else ""
     assert "X03HOOK-正文自报-987654321" not in text2, "撤销后钩子正文未变化（疑似静态回显）"
     shot("case-testhook")
+
+
+def c_rainbow_brackets():
+    """X04：彩虹括号修复验证（1.1.0）——嵌套括号渲染色走 bracketColors
+    硬通道，断言至少 2 种不同颜色且全部在四色板内。"""
+    click_editor()
+    esc_cleanup()
+    send_keys("^a{DEL}")
+    menu_xy("语言", "C#")
+    time.sleep(0.6)
+    click_editor()
+    send_keys("^a{DEL}")
+    # 行尾补换行让光标离开括号，配对高亮熄灭后括号全部回到彩虹色
+    type_text("int x = f(g(a), h(b[0]));\n")
+    time.sleep(0.8)
+    data = hook_dump()
+    docs = data.get("docs") or []
+    assert docs, "X04: 导出快照里没有文档"
+    act = data.get("active", -1)
+    doc = docs[act] if 0 <= act < len(docs) else docs[-1]
+    colors = doc.get("bracketColors") or []
+    assert len(colors) >= 4, f"X04: 括号颜色通道导出过少: {colors!r}"
+    palette = {"198,84,80", "190,138,50", "104,150,90", "84,118,168"}
+    parsed = {c.split(":", 1)[1] for c in colors if ":" in c}
+    assert len(parsed) >= 2, f"X04: 嵌套括号只出现一种颜色: {colors!r}"
+    assert parsed <= palette, f"X04: 出现色板外颜色: {parsed!r}"
+    shot("case-rainbow")
+
+
+def c_writing_panels():
+    """X05：Markdown 写作面板（1.1.0）——预览/大纲开启后正文与字数落位。"""
+    click_editor()
+    esc_cleanup()
+    send_keys("^a{DEL}")
+    menu_xy("语言", "Markdown")
+    time.sleep(0.6)
+    click_editor()
+    send_keys("^a{DEL}")
+    type_text("# 标题一\n正文内容\n## 标题二\n- 列表项")
+    time.sleep(0.5)
+    menu_xy("查看", "预览")
+    menu_xy("查看", "大纲")
+    time.sleep(1.0)
+    status_has(contains="字数")
+    data = hook_dump()
+    docs = data.get("docs") or []
+    act = data.get("active", -1)
+    doc = docs[act] if 0 <= act < len(docs) else docs[-1]
+    assert "标题二" in doc.get("text", ""), f"X05: 正文缺失: {doc.get('text', '')[:80]!r}"
+    shot("case-writing-panels")
+    # 复位：关掉两个面板，不占后续用例的画面
+    menu_xy("查看", "预览")
+    menu_xy("查看", "大纲")
+    time.sleep(0.6)
+
+
+def c_fountain_highlight():
+    """X06：Fountain 剧本高亮（1.1.0）——场景/人物/转场分词落位，
+    状态栏语言与正文以测试钩子为证。"""
+    click_editor()
+    esc_cleanup()
+    send_keys("^a{DEL}")
+    menu_xy("语言", "Fountain 剧本")
+    time.sleep(0.6)
+    click_editor()
+    send_keys("^a{DEL}")
+    type_text("INT. 咖啡馆 - 日\n\nJOHN\n今天天气不错。\n\n> CUT TO: 夜晚")
+    time.sleep(0.6)
+    status_has(contains="Fountain")
+    data = hook_dump()
+    docs = data.get("docs") or []
+    act = data.get("active", -1)
+    doc = docs[act] if 0 <= act < len(docs) else docs[-1]
+    assert "INT. 咖啡馆 - 日" in doc.get("text", ""), "X06: Fountain 正文缺失"
+    shot("case-fountain")
+
+
+def c_csharp_completion():
+    """X07：C# 全量智能补全（1.1.0）——词表先弹、Roslyn 合并，
+    弹层候选走 completionItems 硬通道，断言语义成员（Add/Count）可达。"""
+    click_editor()
+    esc_cleanup()
+    send_keys("^a{DEL}")
+    menu_xy("语言", "C#")
+    time.sleep(0.6)
+    click_editor()
+    send_keys("^a{DEL}")
+    type_text("var list = new List<string>();\nlist.")
+    time.sleep(2.5)   # 两段式：词表先弹，Roslyn 后台合并需一拍
+    data = hook_dump()
+    docs = data.get("docs") or []
+    act = data.get("active", -1)
+    doc = docs[act] if 0 <= act < len(docs) else docs[-1]
+    items = doc.get("completionItems") or []
+    assert "Add" in items and "Count" in items, f"X07: 补全弹层候选缺语义成员: {items[:12]!r}"
+    shot("case-csharp-intel")
+    esc_cleanup()
 
 
 def c_startup():
@@ -1665,7 +1762,7 @@ def _click_xy(x, y):
 
 MENU_INDEX = {
     "文件": {"新建": 0, "打开…": 1, "最近文件": 2, "保存": 3, "另存为…": 4,
-            "全部保存": 5, "导出": 6, "关闭标签": 7, "退出": 8},
+            "全部保存": 5, "快照": 6, "导出": 7, "关闭标签": 8, "退出": 9},
     "编辑": {"撤销（Ctrl+Z）": 0, "重做（Ctrl+Y）": 1, "剪切（Ctrl+X）": 2,
             "复制（Ctrl+C）": 3, "粘贴（Ctrl+V）": 4, "全选（Ctrl+A）": 5,
             "插入时间日期（F5）": 6, "行操作": 7, "大小写转换": 8,
@@ -1673,7 +1770,7 @@ MENU_INDEX = {
             "注释选区（Ctrl+K, C）": 10, "取消注释选区（Ctrl+K, U）": 11},
     "搜索": {"查找": 0, "替换": 1, "在文件中查找…": 2, "查找下一个": 3,
             "查找上一个": 4, "转到行…": 5},
-    "查看": {"自动换行": 0, "显示行号": 1, "缩放": 2},
+    "查看": {"自动换行": 0, "显示行号": 1, "缩放": 2, "预览": 3, "大纲": 4},
     "编码": {"保存编码": 0, "换行符": 1},
     "主题": {"水墨": 0, "天青": 1, "墨夜": 2},
     "工具": {"设置…": 0},
@@ -1684,6 +1781,7 @@ SUB_ITEMS = {
     ("编码", "保存编码"): ["UTF-8", "UTF-8 BOM", "UTF-16 LE", "GBK", "Big5"],
     ("编码", "换行符"): ["Windows (CRLF)", "Unix (LF)", "Mac (CR)"],
     ("文件", "导出"): ["导出为可打印 HTML（PDF 用）…"],
+    ("文件", "快照"): ["立即留底", "查看快照…"],
     ("编辑", "行操作"): ["删除当前行（Ctrl+Shift+L）", "复制当前行（Ctrl+D）",
                     "上移当前行（Alt+↑）", "下移当前行（Alt+↓）"],
     ("编辑", "大小写转换"): ["转为大写（Ctrl+Shift+U）", "转为小写（Ctrl+U）"],
@@ -1692,7 +1790,7 @@ SUB_ITEMS = {
 # 二级弹层左缘相对顶级项中心的偏移（case-eols 实锤：编码 513-413=+100；
 # 查看一级右缘 400=tc+102 → 二级 +105）
 SEC_LEFT_OFF = {("查看", "缩放"): 105, ("编码", "保存编码"): 100, ("编码", "换行符"): 100,
-                ("文件", "导出"): 105, ("编辑", "行操作"): 105, ("编辑", "大小写转换"): 105}
+                ("文件", "导出"): 105, ("文件", "快照"): 105, ("编辑", "行操作"): 105, ("编辑", "大小写转换"): 105}
 
 
 def _region_diff(img_a, img_b, box):
@@ -2307,7 +2405,8 @@ def c_eols():
 
 
 LANGS = ["纯文本", "C / C++", "C#", "Java", "JavaScript / TypeScript", "Go", "Rust",
-         "C 风格其他 (Swift/Kotlin/PHP/Dart…)", "Python", "JSON", "XML / HTML", "Markdown", "SQL"]
+         "C 风格其他 (Swift/Kotlin/PHP/Dart…)", "Python", "JSON", "XML / HTML", "Markdown", "SQL",
+         "Fountain 剧本"]
 
 
 # 注释标记按应用源码（Syntax/CommentCommands.cs + Tokenizer.cs）：
@@ -2318,6 +2417,7 @@ LANG_MARK = {
     "JavaScript / TypeScript": "//", "Go": "//", "Rust": "//",
     "C 风格其他 (Swift/Kotlin/PHP/Dart…)": "//", "Python": "#",
     "JSON": None, "XML / HTML": "xml", "Markdown": None, "SQL": "--",
+    "Fountain 剧本": None,
 }
 
 
@@ -2784,6 +2884,10 @@ def main():
         ("X01 单实例转发打开", c_second_instance_open),
         ("X02 大文件打开与滚动", c_bigfile_scroll),
         ("X03 测试钩子正文导出", c_testhook_dump),
+        ("X04 彩虹括号渲染色", c_rainbow_brackets),
+        ("X05 Markdown 写作面板", c_writing_panels),
+        ("X06 Fountain 剧本高亮", c_fountain_highlight),
+        ("X07 C# 语义补全弹层", c_csharp_completion),
         ("O09 正常退出+崩溃检查", c_exit),
     ]
     part = (sys.argv[1] if len(sys.argv) > 1 else "").upper()

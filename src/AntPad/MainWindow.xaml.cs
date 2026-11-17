@@ -1,4 +1,4 @@
-﻿using AntPad.Controls;
+using AntPad.Controls;
 using AntPad.Models;
 using AntPad.Services;
 using AntPad.Syntax;
@@ -39,6 +39,14 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
 
     readonly List<Doc> _docs = new();
     List<string> _recent = new();
+
+    // 写作模式（1.1.0）：预览/大纲面板与每日目标，仅文章语言（Markdown/Fountain）可用
+    ArticlePreview? _preview;
+    OutlinePanel? _outline;
+    bool _previewOn;
+    bool _outlineOn;
+    int _wordGoal = WritingDoc.DefaultGoal;
+    Microsoft.UI.Dispatching.DispatcherQueueTimer? _refreshTimer;
     Doc? Active
     {
         get
@@ -85,6 +93,7 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
         Tabs.SizeChanged += (_, _) => UpdateEditorHost();
 
         NewDoc();
+        _wordGoal = WritingDoc.LoadGoal();
         ThemeService.Apply(ThemeService.LoadChoice());   // 启动恢复上次主题，默认水墨
         UpdateRecentMenu();
         UpdateTitle();
@@ -128,6 +137,7 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
         ShowActiveEditor();
 
         editor.Modified += (_, _) => SetDirty(doc, true);
+        editor.Modified += (_, _) => { UpdateStatus(); ScheduleArticleRefresh(); };
         editor.StatusChanged += (_, _) => UpdateStatus();
 
         if (path is not null)
@@ -149,12 +159,56 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
                 ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    /// <summary>编辑器宿主顶部留出标签栏高度，其余铺满。</summary>
+    /// <summary>编辑器宿主顶部留出标签栏高度，其余铺满；写作面板打开时编辑器给面板让位。</summary>
     void UpdateEditorHost()
     {
         double strip = 44;
         if (FindNamed(Tabs, "TabListView") is { } lv && lv.ActualHeight > 10) strip = lv.ActualHeight + 2;
-        EditorHost.Margin = new Thickness(0, strip, 0, 0);
+        double left = _outlineOn ? OutlinePanelWidth : 0;
+        double right = _previewOn ? PreviewPanelWidth : 0;
+        foreach (var d in _docs)
+            d.Editor.Margin = new Thickness(left, strip, right, 0);
+    }
+
+    const double PreviewPanelWidth = 420;
+    const double OutlinePanelWidth = 260;
+
+    static bool IsArticle(LangDef lang) => lang.Id is "markdown" or "fountain";
+
+    /// <summary>内容变化后的延迟刷新：400ms 内连续击键只渲染一次，避免大文档每键全量重排。</summary>
+    void ScheduleArticleRefresh()
+    {
+        if (!_previewOn && !_outlineOn) return;
+        if (_refreshTimer is null)
+        {
+            _refreshTimer = DispatcherQueue.CreateTimer();
+            _refreshTimer.Tick += RefreshTick;   // 只订阅一次，重挂会累积回呼
+        }
+        _refreshTimer.Interval = TimeSpan.FromMilliseconds(400);
+        _refreshTimer.Stop();
+        _refreshTimer.Start();
+    }
+
+    void RefreshTick(Microsoft.UI.Dispatching.DispatcherQueueTimer? sender, object args)
+    {
+        _refreshTimer?.Stop();
+        RefreshArticlePanels();
+    }
+
+    /// <summary>把当前文档正文渲染进打开的预览/大纲面板；面板关闭时不动。</summary>
+    void RefreshArticlePanels()
+    {
+        if (Active is not { } doc) return;
+        string id = doc.Editor.SyntaxLanguage.Id;
+        if (_preview is { } p && p.Visibility == Visibility.Visible)
+            p.Render(doc.Editor.Text, id);
+        if (_outline is { } o && o.Visibility == Visibility.Visible)
+            o.Refresh(id switch
+            {
+                "fountain" => WritingDoc.FountainOutline(doc.Editor.Text),
+                "markdown" => WritingDoc.MarkdownOutline(doc.Editor.Text),
+                _ => new(),
+            });
     }
 
     void SetDirty(Doc doc, bool dirty)
@@ -653,6 +707,16 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             UpdateRecentMenu();
             UpdateTitle();
             UpdateStatus();
+            // 写作模式自动快照：文章语言保存成功即留底，保留最近 20 份
+            if (IsArticle(doc.Editor.SyntaxLanguage))
+            {
+                try
+                {
+                    WritingDoc.SaveSnapshot(doc.FilePath, doc.Editor.Text, DateTimeOffset.Now);
+                    WritingDoc.TrimSnapshots(doc.FilePath, WritingDoc.SnapshotKeep);
+                }
+                catch (Exception snapEx) { CrashLog.Report(snapEx, "保存自动快照"); }
+            }
             return true;
         }
         catch (Exception ex)
@@ -976,7 +1040,7 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
     }
 
     /// <summary>界面展示用版本号；与安装包文件名保持一致。</summary>
-    public const string AppVersion = "1.0.11";
+    public const string AppVersion = "1.1.0";
 
     /// <summary>
     /// 测试钩子快照（2026-11-17 老板令）：把当前全部标签的正文与状态
@@ -999,6 +1063,10 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
                 CaretColumn = d.Editor.CaretColumn,
                 SelectionLength = d.Editor.SelectionLength,
             });
+            try { s.Docs[^1].BracketColors = d.Editor.RenderedBracketColors(); }
+            catch { /* 颜色通道失败不挡正文快照 */ }
+            try { s.Docs[^1].CompletionItems = d.Editor.PopupItems; }
+            catch { /* 弹层通道失败不挡正文快照 */ }
         }
         return s;
     }
@@ -1058,6 +1126,164 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
         EncText.Text = EncodingHelper.NameOf(doc.Enc, doc.Bom);
         EolText.Text = doc.Eol switch { "\r\n" => "CRLF", "\n" => "LF", _ => "CR" };
         LangText.Text = doc.Editor.SyntaxLanguage.Name;
+        UpdateArticleUI(doc);
+    }
+
+    /// <summary>写作面板与字数显示联动：仅文章语言显示；面板可见性/勾选状态在这里归一。</summary>
+    void UpdateArticleUI(Doc doc)
+    {
+        bool article = IsArticle(doc.Editor.SyntaxLanguage);
+        PreviewToggle.Visibility = article ? Visibility.Visible : Visibility.Collapsed;
+        OutlineToggle.Visibility = article ? Visibility.Visible : Visibility.Collapsed;
+        if (article)
+        {
+            var st = WritingDoc.CountWords(doc.Editor.Text);
+            WordText.Text = $"字数 {st.Words} / 目标 {_wordGoal}" + (st.Words >= _wordGoal ? " ✔" : "");
+            WordText.Visibility = Visibility.Visible;
+        }
+        else WordText.Visibility = Visibility.Collapsed;
+
+        if (_preview is { } p)
+            p.Visibility = article && _previewOn ? Visibility.Visible : Visibility.Collapsed;
+        if (_outline is { } o)
+            o.Visibility = article && _outlineOn ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // ================= 写作模式：预览 / 大纲 / 目标 =================
+
+    void OnPreviewToggle(object sender, RoutedEventArgs e)
+    {
+        _previewOn = PreviewToggle.IsChecked == true;
+        if (_previewOn && _preview is null)
+        {
+            _preview = new ArticlePreview
+            {
+                Visibility = Visibility.Collapsed,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                Width = PreviewPanelWidth,
+            };
+            EditorHost.Children.Add(_preview);
+        }
+        UpdateEditorHost();
+        RefreshArticlePanels();
+    }
+
+    void OnOutlineToggle(object sender, RoutedEventArgs e)
+    {
+        _outlineOn = OutlineToggle.IsChecked == true;
+        if (_outlineOn && _outline is null)
+        {
+            _outline = new OutlinePanel
+            {
+                Visibility = Visibility.Collapsed,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                Width = OutlinePanelWidth,
+            };
+            _outline.ItemClicked += line => { try { Ed?.GoToLine(line); } catch { } };
+            EditorHost.Children.Add(_outline);
+        }
+        UpdateEditorHost();
+        RefreshArticlePanels();
+    }
+
+    /// <summary>点状态栏字数：设置每日目标。</summary>
+    async void OnWordGoalTap(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+    {
+        if (Active is null || !IsArticle(Active.Editor.SyntaxLanguage)) return;
+        var box = new NumberBox { Value = _wordGoal, Minimum = 1, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact };
+        var dlg = new ContentDialog
+        {
+            Title = "每日字数目标",
+            Content = new StackPanel
+            {
+                Spacing = 8,
+                Children = { new TextBlock { Text = "达标后状态栏会打勾；目标只影响显示，不改动正文。" }, box },
+            },
+            PrimaryButtonText = "保存",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = Content.XamlRoot,
+        };
+        if (await ShowDialogSafe(dlg) == ContentDialogResult.Primary)
+        {
+            if (double.IsFinite(box.Value))
+            {
+                int goal = (int)Math.Round(box.Value);
+                if (goal >= 1)
+                {
+                    _wordGoal = goal;
+                    WritingDoc.SaveGoal(goal);
+                    UpdateStatus();
+                }
+            }
+        }
+    }
+
+    // ================= 快照留底 =================
+
+    /// <summary>立即给当前文档拍一份快照（旁路副本，不改正文）。</summary>
+    void OnSnapshotSave(object sender, RoutedEventArgs e)
+    {
+        if (Active is not { } doc) return;
+        try
+        {
+            string path = WritingDoc.SaveSnapshot(doc.FilePath, doc.Editor.Text, DateTimeOffset.Now);
+            WritingDoc.TrimSnapshots(doc.FilePath, WritingDoc.SnapshotKeep);
+            InfoTip("已留底：" + System.IO.Path.GetFileName(path));
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Report(ex, "快照留底");
+            InfoTip("快照保存失败，已记录日志。");
+        }
+    }
+
+    /// <summary>查看当前文档的快照列表：选中即预览，只读。</summary>
+    async void OnSnapshotView(object sender, RoutedEventArgs e)
+    {
+        if (Active is not { } doc) return;
+        var dlg = new ContentDialog
+        {
+            Title = "快照留底",
+            CloseButtonText = "关闭",
+            XamlRoot = Content.XamlRoot,
+        };
+        var list = new ListBox { Height = 200, SelectionMode = SelectionMode.Single };
+        var body = new TextBox { Height = 200, Margin = new Thickness(0, 8, 0, 0), IsReadOnly = true, TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap, AcceptsReturn = true, ScrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        dlg.Content = new StackPanel
+        {
+            MinWidth = 480,
+            Children = { list, body },
+        };
+        try
+        {
+            var snaps = WritingDoc.ListSnapshots(doc.FilePath);
+            if (snaps.Count == 0)
+            {
+                list.Items.Add(new ListBoxItem { Content = "（还没有快照——保存或手动留底会自动生成）", IsEnabled = false });
+            }
+            else
+            {
+                foreach (var s in snaps)
+                {
+                    var info = s;
+                    list.Items.Add(new ListBoxItem { Content = $"{info.When:yyyy-MM-dd HH:mm:ss}  {info.Size:N0} 字节", Tag = info.Path });
+                }
+                list.SelectionChanged += (_, _) =>
+                {
+                    if (list.SelectedItem is ListBoxItem it && it.Tag is string p)
+                        body.Text = WritingDoc.ReadSnapshot(p) ?? "（快照读不到，可能已被清理）";
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Report(ex, "快照查看");
+            body.Text = "快照清单读取失败：" + ex.Message;
+        }
+        await ShowDialogSafe(dlg);
     }
 
     void UpdateEncChecks()

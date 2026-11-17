@@ -941,11 +941,46 @@ public sealed class CodeEditor : Grid
             {
                 if (p < 0) continue;
                 var f = doc.GetRange(p, p + 1).CharacterFormat;
-                f.ForegroundColor = TokenColor(TokenAt(p));
+                // 恢复彩虹色而不是正文色：此前恢复成默认色，光标扫过的括号
+                // 会一个个褪成正文色——真机上表现为「嵌套括号颜色还是一样」
+                f.ForegroundColor = RainbowColorAt(p);
             }
         }
         catch { }
         _hlA = _hlB = -1;
+    }
+
+    /// <summary>该位置的彩虹色；不在彩虹图内则回退词法色。</summary>
+    Windows.UI.Color RainbowColorAt(int p)
+    {
+        if (_rainbow is { } map && map.TryGetValue(p, out int d))
+            return BracketColors[d % BracketColors.Length];
+        return TokenColor(TokenAt(p));
+    }
+
+    /// <summary>云端验证通道：当前补全弹层候选（弹层未开时为空表）。
+    /// 仅 --testhook 握手时被调用，普通运行零调用。</summary>
+    public List<string> PopupItems => _popup.IsOpen ? new List<string>(_items) : new List<string>();
+
+    /// <summary>云端验证通道：导出前 64 个括号位的实测渲染色（位置:R,G,B）。
+    /// 仅 --testhook 启动且测试握手时被调用，普通运行零调用。</summary>
+    public List<string> RenderedBracketColors()
+    {
+        var list = new List<string>();
+        try
+        {
+            if (_re.Document is not { } doc || _rainbow is not { } map) return list;
+            int i = 0;
+            foreach (var (pos, _) in map)
+            {
+                if (i >= 64) break;
+                var c = doc.GetRange(pos, pos + 1).CharacterFormat.ForegroundColor;
+                list.Add($"{pos}:{c.R},{c.G},{c.B}");
+                i++;
+            }
+        }
+        catch { }
+        return list;
     }
 
     TokKind TokenAt(int p)
@@ -1878,39 +1913,24 @@ public sealed class CodeEditor : Grid
         return _baseFg;
     }
 
-    /// <summary>彩虹括号：按嵌套层级给 ()[]{} 循环着色（字符串/注释内不着色）。</summary>
+    /// <summary>彩虹括号：按嵌套层级给 ()[]{} 循环着色（字符串/注释内不着色）。
+    /// 深度图由词法器统一产出（纯逻辑件，LogicTests 可测），此处只管画。</summary>
+    Dictionary<int, int>? _rainbow;   // 位置→深度缓存：配对高亮熄灭时按此恢复彩虹色
+
     void ApplyRainbow(string text, List<TokenSpan> toks, int n)
     {
         try
         {
             if (_re.Document is not { } doc) return;
-            var masked = new bool[text.Length];
-            foreach (var t in toks)
+            var depth = Tokenizer.BracketDepths(text, toks);
+            _rainbow = depth;
+            int ops = 0;
+            foreach (var (pos, d) in depth)
             {
-                if (t.Kind is not (TokKind.String or TokKind.Comment or TokKind.DocComment)) continue;
-                int end = Math.Min(t.Start + t.Length, masked.Length);
-                for (int i = Math.Max(0, t.Start); i < end; i++) masked[i] = true;
-            }
-
-            int depth = 0, ops = 0;
-            for (int i = 0; i < text.Length && ops < 5000; i++)
-            {
-                if (masked[i]) continue;
-                char c = text[i];
-                if (c == '(' || c == '[' || c == '{')
-                {
-                    // GetRange 两参是"起点, 终点"：单字符区间为 (i, i+1)
-                    doc.GetRange(i, i + 1).CharacterFormat.ForegroundColor
-                        = BracketColors[depth % BracketColors.Length];
-                    depth++; ops++;
-                }
-                else if (c == ')' || c == ']' || c == '}')
-                {
-                    depth = Math.Max(0, depth - 1);
-                    doc.GetRange(i, i + 1).CharacterFormat.ForegroundColor
-                        = BracketColors[depth % BracketColors.Length];
-                    ops++;
-                }
+                if (ops >= 5000) break;
+                doc.GetRange(pos, pos + 1).CharacterFormat.ForegroundColor
+                    = BracketColors[d % BracketColors.Length];
+                ops++;
             }
         }
         catch { }
@@ -1963,9 +1983,9 @@ public sealed class CodeEditor : Grid
 
     void MaybeShowPopup()
     {
-        // 仅对代码语言启用（纯文本与 Markdown 等文章类内容不弹，
-        // 避免写文档时每个词都冒出提示框）
-        if (_lang.Id is "plain" or "markdown") { HidePopup(); return; }
+        // 仅对代码语言启用（纯文本与文章类内容不弹，
+        // 避免写文档/剧本时每个词都冒出提示框）
+        if (_lang.Id is "plain" or "markdown" or "fountain") { HidePopup(); return; }
         var t = RawText;
         int caret = Math.Min(SelPos, t.Length);
         var items = CompletionEngine.GetCompletions(t, caret, _lang, out var prefix);
@@ -1982,6 +2002,32 @@ public sealed class CodeEditor : Grid
         if (items.Count == 1 && items[0] == CurrentWordPrefix(t, caret))
         { if (_popup.IsOpen) HidePopup(); return; }
         ShowPopup(items, prefix, caret);
+
+        // C# 语义级补全（1.1.0）：Roslyn 后台分析，回来时光标没动才续弹。
+        // 词表先弹（快），语义结果到了合并去重（全）——VS 同款两段式。
+        if (_lang.Id == "csharp")
+        {
+            _ = EnrichWithRoslynAsync(t, caret);
+        }
+    }
+
+    async Task EnrichWithRoslynAsync(string textAtCall, int caretAtCall)
+    {
+        // UI 线程先抓住队列句柄：后台线程上没有同步上下文，回不来
+        var queue = DispatcherQueue.GetForCurrentThread();
+        var extra = await CSharpIntel.GetCompletionsAsync(textAtCall, caretAtCall).ConfigureAwait(false);
+        if (extra is null || extra.Count == 0) return;
+        queue?.TryEnqueue(() =>
+        {
+            bool sameCaret = RawText == textAtCall && Math.Min(SelPos, RawText.Length) == caretAtCall;
+            if (!sameCaret) return;
+            var merged = new List<string>(extra.Select(i => i.Text));
+            foreach (var it in _items) if (!merged.Contains(it)) merged.Add(it);
+            if (merged.Count > 200) merged.RemoveRange(200, merged.Count - 200);
+            string prefix = "";
+            CompletionEngine.GetCompletions(RawText, caretAtCall, _lang, out prefix);
+            ShowPopup(merged, prefix, caretAtCall);
+        });
     }
 
     string CurrentWordPrefix(string t, int caret)

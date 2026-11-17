@@ -24,7 +24,7 @@ public sealed class LangDef
     public string[] ControlWords = Array.Empty<string>();
     public string[] Types = Array.Empty<string>();
     public bool Strings = true, Chars = true, Numbers = true;
-    public bool XmlMode, JsonMode, MarkdownMode, SqlMode;
+    public bool XmlMode, JsonMode, MarkdownMode, SqlMode, FountainMode;
 
     // 纯文本不做任何语法着色：引号、数字、成员都保持正文色
     public static readonly LangDef Plain = new() { Strings = false, Chars = false, Numbers = false };
@@ -40,8 +40,9 @@ public sealed class LangDef
     public static readonly LangDef Xml = Xml_();
     public static readonly LangDef Markdown = Markdown_();
     public static readonly LangDef Sql = Sql_();
+    public static readonly LangDef Fountain = Fountain_();
 
-    public static readonly LangDef[] All = { Plain, CCpp, CSharp, Java, Js, Go, Rust, Clike, Python, Json, Xml, Markdown, Sql };
+    public static readonly LangDef[] All = { Plain, CCpp, CSharp, Java, Js, Go, Rust, Clike, Python, Json, Xml, Markdown, Sql, Fountain };
 
     /// <summary>大家族判断：C 风格花括号语言（共用折叠/参数提示/格式化行为）。</summary>
     public static bool IsCLike(string langId) =>
@@ -261,6 +262,14 @@ public sealed class LangDef
         return d;
     }
 
+    static LangDef Fountain_()
+    {
+        // 剧本专用格式（纯文本约定）：场景标题、人物、台词靠书写约定区分。
+        // 与 Markdown 同为文章类内容：记事本照开，零锁门。
+        var d = new LangDef { Id = "fountain", Name = "Fountain 剧本", FountainMode = true };
+        return d;
+    }
+
     public static LangDef FromFileName(string path)
     {
         string ext = Path.GetExtension(path).ToLowerInvariant();
@@ -279,6 +288,7 @@ public sealed class LangDef
             ".props" or ".targets" or ".config" or ".resx" => Xml,
             ".md" or ".markdown" => Markdown,
             ".sql" => Sql,
+            ".fountain" => Fountain,
             _ => Plain,
         };
     }
@@ -296,6 +306,7 @@ public static class Tokenizer
     {
         int n = text.Length;
         if (n == 0) return;
+        if (lang.FountainMode) { FountainDoc(lang, text, output); return; }
         var hst = new HlState();
         int start = 0;
         while (start < n)
@@ -316,6 +327,7 @@ public static class Tokenizer
 
     public static void Tokenize(LangDef lang, string text, ref HlState st, List<TokenSpan> output)
     {
+        if (lang.FountainMode) { FountainInline(text, output); return; }
         if (lang.MarkdownMode) { Markdown(lang, text, output); return; }
         if (lang.XmlMode) { XmlMode(lang, text, ref st, output); return; }
 
@@ -598,5 +610,123 @@ public static class Tokenizer
             }
             i++;
         }
+    }
+
+    // ================= Fountain 剧本 =================
+
+    /// <summary>场景标题前缀（Fountain 规范，不区分大小写）。</summary>
+    static readonly string[] SceneHeads = { "INT.", "EXT.", "EST.", "INT/EXT.", "I/E." };
+
+    /// <summary>判断一行是否全大写（至少一个字母且无小写字母）。</summary>
+    static bool IsAllCaps(string line)
+    {
+        bool hasLetter = false;
+        foreach (var ch in line)
+        {
+            if (char.IsLower(ch)) return false;
+            if (char.IsLetter(ch)) hasLetter = true;
+        }
+        return hasLetter;
+    }
+
+    /// <summary>Fountain 整篇分词：场景标题/人物/转场/行内强调。
+    /// 人物判定需要看下一行（人物名后面跟着台词），所以走整篇入口。</summary>
+    static void FountainDoc(LangDef lang, string text, List<TokenSpan> output)
+    {
+        int n = text.Length, lineStart = 0;
+        while (lineStart < n)
+        {
+            int nl = text.IndexOf('\n', lineStart);
+            int lineEnd = nl < 0 ? n : nl;
+            string line = text[lineStart..lineEnd].TrimEnd('\r');
+            string trimmed = line.Trim();
+            bool nextNonBlank = lineEnd < n && text[(nl + 1)..].TrimStart().Length > 0;
+
+            if (trimmed.Length == 0) { /* 空行不着色 */ }
+            else if (IsSceneHeading(trimmed)) { output.Add(new(lineStart, lineEnd - lineStart, TokKind.Heading)); }
+            else if (trimmed[0] == '>') { output.Add(new(lineStart, lineEnd - lineStart, TokKind.Control)); }
+            else if (IsAllCaps(trimmed) && nextNonBlank && !trimmed.EndsWith("TO:", StringComparison.Ordinal))
+            {
+                output.Add(new(lineStart, lineEnd - lineStart, TokKind.Member));
+            }
+            else
+            {
+                var inline = new List<TokenSpan>();
+                FountainInline(line, inline);
+                foreach (var t in inline)
+                    output.Add(new(t.Start + lineStart, t.Length, t.Kind));
+            }
+
+            if (nl < 0) break;
+            lineStart = nl + 1;
+        }
+    }
+
+    static bool IsSceneHeading(string line)
+    {
+        foreach (var head in SceneHeads)
+            if (line.StartsWith(head, StringComparison.OrdinalIgnoreCase)) return true;
+        // 强制场景标题：结尾 #（如 「内景 老宅 #」）
+        return line.Length > 1 && line.EndsWith("#", StringComparison.Ordinal) && char.IsUpper(line[0]);
+    }
+
+    /// <summary>Fountain 行内强调：**粗体**、*斜体*、_下划线_、`code`（复用 Markdown 语义）。</summary>
+    static void FountainInline(string text, List<TokenSpan> output)
+    {
+        int i = 0, n = text.Length;
+        while (i < n)
+        {
+            if (text[i] == '`')
+            {
+                int close = text.IndexOf('`', i + 1);
+                if (close > i) { output.Add(new(i, close + 1 - i, TokKind.String)); i = close + 1; continue; }
+            }
+            if (i + 1 < n && text[i] == '*' && text[i + 1] == '*')
+            {
+                int close = text.IndexOf("**", i + 2, StringComparison.Ordinal);
+                if (close > 0) { output.Add(new(i, close + 2 - i, TokKind.Control)); i = close + 2; continue; }
+            }
+            if (text[i] == '*' || text[i] == '_')
+            {
+                int close = text.IndexOf(text[i], i + 1);
+                if (close > i + 1) { output.Add(new(i, close + 1 - i, TokKind.Control)); i = close + 1; continue; }
+            }
+            i++;
+        }
+    }
+
+    // ================= 彩虹括号深度图 =================
+
+    /// <summary>按嵌套深度给 ()[]{} 建深度图：键=字符位置，值=深度（0 起，外层 0）。
+    /// 字符串/注释/文档注释内的括号不参与计数（与着色口径一致）。
+    /// 未配对的闭括号钳到 0 层（保持与着色器同一口径）。</summary>
+    public static Dictionary<int, int> BracketDepths(string text, List<TokenSpan> toks)
+    {
+        var masked = new bool[text.Length];
+        foreach (var t in toks)
+        {
+            if (t.Kind is not (TokKind.String or TokKind.Comment or TokKind.DocComment)) continue;
+            int end = Math.Min(t.Start + t.Length, masked.Length);
+            for (int i = Math.Max(0, t.Start); i < end; i++) masked[i] = true;
+        }
+
+        var map = new Dictionary<int, int>();
+        int depth = 0;
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (masked[i]) continue;
+            char c = text[i];
+            if (c == '(' || c == '[' || c == '{')
+            {
+                map[i] = depth;
+                depth++;
+            }
+            else if (c == ')' || c == ']' || c == '}')
+            {
+                depth = Math.Max(0, depth - 1);
+                map[i] = depth;
+            }
+        }
+        return map;
     }
 }

@@ -49,6 +49,10 @@
           </MenuFlyoutItem.KeyboardAccelerators>
         </MenuFlyoutItem>
         <MenuFlyoutItem Text="全部保存" Click="OnSaveAll"/>
+        <MenuFlyoutSubItem Text="快照">
+          <MenuFlyoutItem Text="立即留底" Click="OnSnapshotSave"/>
+          <MenuFlyoutItem Text="查看快照…" Click="OnSnapshotView"/>
+        </MenuFlyoutSubItem>
         <MenuFlyoutSubItem Text="导出">
           <MenuFlyoutItem Text="导出为可打印 HTML（PDF 用）…" Click="OnExportPrintableHtml"/>
         </MenuFlyoutSubItem>
@@ -151,6 +155,10 @@
             </MenuFlyoutItem.KeyboardAccelerators>
           </MenuFlyoutItem>
         </MenuFlyoutSubItem>
+        <MenuFlyoutSeparator/>
+        <!-- 预览/大纲仅文章语言（Markdown/Fountain）可用，普通语言下隐藏 -->
+        <ToggleMenuFlyoutItem x:Name="PreviewToggle" Text="预览" Click="OnPreviewToggle"/>
+        <ToggleMenuFlyoutItem x:Name="OutlineToggle" Text="大纲" Click="OnOutlineToggle"/>
       </MenuBarItem>
 
       <!-- 语言菜单：项与文案全部来自 LangDef.All 唯一清单，构造时动态生成
@@ -224,6 +232,8 @@
                    AutomationProperties.AccessibilityView="Content"/>
         <TextBlock x:Name="LangText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                    AutomationProperties.AccessibilityView="Content"/>
+        <TextBlock x:Name="WordText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                   AutomationProperties.AccessibilityView="Content" Tapped="OnWordGoalTap"/>
       </StackPanel>
     </Border>
   </Grid>

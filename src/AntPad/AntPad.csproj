@@ -19,9 +19,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <Version>1.0.11</Version>
-    <FileVersion>1.0.11</FileVersion>
-    <InformationalVersion>1.0.11</InformationalVersion>
+    <Version>1.1.0</Version>
+    <FileVersion>1.1.0</FileVersion>
+    <InformationalVersion>1.1.0</InformationalVersion>
     <Product>TaoPad</Product>
     <Company>Tao</Company>
     <Copyright>Copyright (c) 2026</Copyright>
@@ -33,6 +33,9 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.5.240802000" />
+    <!-- C# 智能补全（1.1.0）：与 Visual Studio 同源的 Roslyn 分析引擎，
+         纯内存分析（合成编译），不读文件不建进程 -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" />
   </ItemGroup>
 
   <ItemGroup>
