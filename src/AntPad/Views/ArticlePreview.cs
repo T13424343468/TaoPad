@@ -45,6 +45,17 @@ public sealed class ArticlePreview : ContentControl
     {
         _rtb.Blocks.Clear();
         var lines = text.Replace("\r\n", "\n").Split('\n');
+        // 渲染上限：超大文档全量重建数千段会卡 UI 主线程（1.1.0 审查）
+        const int MaxLines = 4000;
+        if (lines.Length > MaxLines)
+        {
+            var head = lines[..MaxLines];
+            if (langId == "fountain") RenderFountain(head);
+            else RenderMarkdown(head);
+            _rtb.Blocks.Add(Block(new List<Inline> {
+                new Run { Text = $"…… 已截断：共 {lines.Length} 行，预览仅渲染前 {MaxLines} 行", Opacity = 0.6 } }, top: 12));
+            return;
+        }
         if (langId == "fountain") RenderFountain(lines);
         else RenderMarkdown(lines);
     }

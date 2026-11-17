@@ -1929,7 +1929,8 @@ public sealed class CodeEditor : Grid
             var depth = Tokenizer.BracketDepths(text, toks);
             _rainbow = depth;
             int ops = 0;
-            foreach (var (pos, d) in depth)
+            // 按位置升序绘制：字典遍历顺序不保证有序，截断时保证画的是最前的括号
+            foreach (var (pos, d) in depth.OrderBy(p => p.Key))
             {
                 if (ops >= 5000) break;
                 doc.GetRange(pos, pos + 1).CharacterFormat.ForegroundColor
@@ -2033,14 +2034,19 @@ public sealed class CodeEditor : Grid
         if (extra is null || extra.Count == 0) return;
         queue?.TryEnqueue(() =>
         {
-            bool sameCaret = RawText == textAtCall && Math.Min(SelPos, RawText.Length) == caretAtCall;
-            if (!sameCaret) return;
-            var merged = new List<string>(extra.Select(i => i.Text));
-            foreach (var it in _items) if (!merged.Contains(it)) merged.Add(it);
-            if (merged.Count > 200) merged.RemoveRange(200, merged.Count - 200);
-            string prefix = "";
-            CompletionEngine.GetCompletions(RawText, caretAtCall, _lang, out prefix);
-            ShowPopup(merged, prefix, caretAtCall);
+            // 应用退出/编辑器析构瞬间回调可能仍在队里，兜住避免未捕获异常崩进程
+            try
+            {
+                bool sameCaret = RawText == textAtCall && Math.Min(SelPos, RawText.Length) == caretAtCall;
+                if (!sameCaret) return;
+                var merged = new List<string>(extra.Select(i => i.Text));
+                foreach (var it in _items) if (!merged.Contains(it)) merged.Add(it);
+                if (merged.Count > 200) merged.RemoveRange(200, merged.Count - 200);
+                string prefix = "";
+                CompletionEngine.GetCompletions(RawText, caretAtCall, _lang, out prefix);
+                ShowPopup(merged, prefix, caretAtCall);
+            }
+            catch { /* 生命周期竞态：编辑器已废则静默放弃 */ }
         });
     }
 

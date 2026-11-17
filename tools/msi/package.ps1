@@ -29,7 +29,12 @@ if ($wixVer -notmatch '^6') {
     if ($wixVer -notmatch '^6') { throw "WiX 工具版本不对 ($wixVer)，请把该信息发给开发助手" }
 }
 
-$msi = Join-Path $OutDir "TaoPad-1.0.9-x64.msi"
+# 文件名版本号取自安装定义（Package.wxs 的 Package Version），杜绝手写漂移
+# （2026-11-18 审查发现：原写死 TaoPad-1.0.9，出 1.1.0 包会顶旧名）
+$wxsRaw = Get-Content $WxsPath -Raw
+if ($wxsRaw -notmatch 'Version="(\d+\.\d+\.\d+)"') { throw "Package.wxs 里找不到版本号" }
+$pkgVersion = $Matches[1]
+$msi = Join-Path $OutDir "TaoPad-$pkgVersion-x64.msi"
 if (Test-Path $msi) { Remove-Item $msi -Force }
 # PublishDir 由命令行传入，界面文件不用改动；自定义 UI 无需额外扩展
 # -pdbtype none：不落调试附档（.wixpdb），保证 out 里只有 msi 一项

@@ -164,8 +164,10 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
     {
         double strip = 44;
         if (FindNamed(Tabs, "TabListView") is { } lv && lv.ActualHeight > 10) strip = lv.ActualHeight + 2;
-        double left = _outlineOn ? OutlinePanelWidth : 0;
-        double right = _previewOn ? PreviewPanelWidth : 0;
+        // 只有当前文档是文章语言时才让位：面板隐藏（如切到纯文本）时同步收让位（1.1.0 审查）
+        bool article = Active is { } a && IsArticle(a.Editor.SyntaxLanguage);
+        double left = _outlineOn && article ? OutlinePanelWidth : 0;
+        double right = _previewOn && article ? PreviewPanelWidth : 0;
         foreach (var d in _docs)
             d.Editor.Margin = new Thickness(left, strip, right, 0);
     }
@@ -1170,6 +1172,8 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             p.Visibility = article && _previewOn ? Visibility.Visible : Visibility.Collapsed;
         if (_outline is { } o)
             o.Visibility = article && _outlineOn ? Visibility.Visible : Visibility.Collapsed;
+        // 让位边距与面板可见性同步：非文章语言/面板隐藏时收回让位（1.1.0 审查）
+        UpdateEditorHost();
     }
 
     // ================= 写作模式：预览 / 大纲 / 目标 =================
