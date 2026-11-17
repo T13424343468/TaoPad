@@ -88,6 +88,10 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
         ThemeService.Apply(ThemeService.LoadChoice());   // 启动恢复上次主题，默认水墨
         UpdateRecentMenu();
         UpdateTitle();
+
+        // 测试钩子（2026-11-17 老板令）：仅 --testhook 启动时激活，普通
+        // 运行零副作用；给云端自动测试一条不依赖 UIA 读层的正文自报通道
+        Services.TestHook.Start(DispatcherQueue, SnapshotForTest);
     }
 
     void FitEditors()
@@ -972,7 +976,32 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
     }
 
     /// <summary>界面展示用版本号；与安装包文件名保持一致。</summary>
-    public const string AppVersion = "1.0.10";
+    public const string AppVersion = "1.0.11";
+
+    /// <summary>
+    /// 测试钩子快照（2026-11-17 老板令）：把当前全部标签的正文与状态
+    /// 一次带走，供 --testhook 会话的文件握手导出。只在测试班触发，
+    /// 普通运行永不进入本方法。
+    /// </summary>
+    TestHook.Snapshot SnapshotForTest()
+    {
+        var s = new TestHook.Snapshot { Version = AppVersion, Active = _docs.IndexOf(Active) };
+        foreach (var d in _docs)
+        {
+            s.Docs.Add(new TestHook.DocInfo
+            {
+                Title = d.Title,
+                Path = d.FilePath,
+                Dirty = d.Dirty,
+                ReadOnly = d.ReadOnly,
+                Text = d.Editor.Text,
+                CaretLine = d.Editor.CaretLine,
+                CaretColumn = d.Editor.CaretColumn,
+                SelectionLength = d.Editor.SelectionLength,
+            });
+        }
+        return s;
+    }
 
     /// <summary>
     /// UIA 供给修复（2026-11-14 定谳班：云端 UIA 对菜单/状态栏空返）。

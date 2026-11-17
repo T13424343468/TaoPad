@@ -1224,6 +1224,54 @@ def wer_count():
 
 # ---------------- 用例 ----------------
 
+HOOK_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "TaoPad", "testhook")
+
+
+def hook_dump(timeout=10.0):
+    """--testhook 文件握手：放请求等响应。正文导出不再依赖 UIA 读层
+    （v39.5 定谳 UIA 对大文档会饿死，故走应用内存快照）。"""
+    os.makedirs(HOOK_DIR, exist_ok=True)
+    req = os.path.join(HOOK_DIR, "request.json")
+    resp = os.path.join(HOOK_DIR, "response.json")
+    try:
+        if os.path.exists(resp):
+            os.remove(resp)
+    except OSError:
+        pass
+    open(req, "w", encoding="utf-8").close()
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if os.path.exists(resp):
+            with open(resp, "r", encoding="utf-8") as f:
+                return json.load(f)
+        time.sleep(0.2)
+    raise RuntimeError("测试钩子未在时限内导出正文")
+
+
+def c_testhook_dump():
+    """X03：正文自报通道闭环——打探针→握手导出→断言正文含探针→
+    撤销后再握手断言变化，证伪静态回显。"""
+    click_editor()
+    esc_cleanup()
+    send_keys("^a{DEL}")
+    type_text("X03HOOK-正文自报-987654321")
+    data = hook_dump()
+    assert data.get("version") == "1.0.11", f"版本不符: {data.get('version')!r}"
+    docs = data.get("docs") or []
+    assert docs, "导出快照里没有文档"
+    active = data.get("active", -1)
+    doc = docs[active] if 0 <= active < len(docs) else docs[-1]
+    assert "X03HOOK-正文自报-987654321" in doc.get("text", ""), \
+        f"钩子正文缺探针: {doc.get('text', '')[:200]!r}"
+    send_keys("^z")
+    time.sleep(0.5)
+    data2 = hook_dump()
+    docs2 = data2.get("docs") or []
+    text2 = docs2[active].get("text", "") if docs2 else ""
+    assert "X03HOOK-正文自报-987654321" not in text2, "撤销后钩子正文未变化（疑似静态回显）"
+    shot("case-testhook")
+
+
 def c_startup():
     status_has(contains="行 1，列 1")
     shot("case-startup")
@@ -2669,7 +2717,9 @@ def main():
     exe = find_exe()
     print("exe:", exe, flush=True)
     from pywinauto import Application, Desktop
-    app = Application(backend="uia").start(exe, timeout=25)
+    # B 班带 --testhook：X03 走文件握手导出正文；A 班与普通运行零差别
+    start_cmd = f'"{exe}" --testhook' if (sys.argv[1:2] or [""])[0].upper() == "B" else exe
+    app = Application(backend="uia").start(start_cmd, timeout=25)
     time.sleep(12)
     # 把宿主机 agent/PowerShell 控制台窗口全部最小化，防抢前台（证据：FAIL 截图前台为其终端）
     try:
@@ -2733,6 +2783,7 @@ def main():
         ("O08b 鼠标路径菜单对照", c_mouse_menu),
         ("X01 单实例转发打开", c_second_instance_open),
         ("X02 大文件打开与滚动", c_bigfile_scroll),
+        ("X03 测试钩子正文导出", c_testhook_dump),
         ("O09 正常退出+崩溃检查", c_exit),
     ]
     part = (sys.argv[1] if len(sys.argv) > 1 else "").upper()
