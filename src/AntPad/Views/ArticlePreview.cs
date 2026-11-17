@@ -187,7 +187,7 @@ public sealed class ArticlePreview : ContentControl
         Text = text,
         FontFamily = mono ? new FontFamily("Cascadia Mono, Consolas") : null,
         FontWeight = bold ? Microsoft.UI.Text.FontWeights.Bold : Microsoft.UI.Text.FontWeights.Normal,
-        FontStyle = italic ? Microsoft.UI.Text.FontStyles.Italic : Microsoft.UI.Text.FontStyles.Normal,
+        FontStyle = italic ? Windows.UI.Text.FontStyle.Italic : Windows.UI.Text.FontStyle.Normal,
     };
 
     static Paragraph Block(List<Inline> runs, double top, double? size = null, double indent = 0)

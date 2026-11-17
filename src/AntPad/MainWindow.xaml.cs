@@ -1049,7 +1049,7 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
     /// </summary>
     TestHook.Snapshot SnapshotForTest()
     {
-        var s = new TestHook.Snapshot { Version = AppVersion, Active = _docs.IndexOf(Active) };
+        var s = new TestHook.Snapshot { Version = AppVersion, Active = Active is { } act ? _docs.IndexOf(act) : -1 };
         foreach (var d in _docs)
         {
             s.Docs.Add(new TestHook.DocInfo
@@ -1251,7 +1251,8 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             XamlRoot = Content.XamlRoot,
         };
         var list = new ListBox { Height = 200, SelectionMode = SelectionMode.Single };
-        var body = new TextBox { Height = 200, Margin = new Thickness(0, 8, 0, 0), IsReadOnly = true, TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap, AcceptsReturn = true, ScrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        var body = new TextBox { Height = 200, Margin = new Thickness(0, 8, 0, 0), IsReadOnly = true, TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap, AcceptsReturn = true };
+        Microsoft.UI.Xaml.Controls.ScrollViewer.SetVerticalScrollBarVisibility(body, ScrollBarVisibility.Auto);
         dlg.Content = new StackPanel
         {
             MinWidth = 480,
