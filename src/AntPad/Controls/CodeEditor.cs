@@ -1833,12 +1833,19 @@ public sealed class CodeEditor : Grid
 
     /// <summary>重着色的全部落笔动作（默认色复位、分词上色、彩虹括号、
     /// 列块重亮、括号匹配恢复）。由 Recolor 在单个撤销组内调用。
-    /// 参数用 object 接——ITextDocument 非 public 类型不可出现在签名里。</summary>
+    /// 参数用 object 接——ITextDocument 非 public 类型不可出现在签名里。
+    /// 体内对 docBox 的操作全部走反射（GetType().GetMethod/GetProperty），
+    /// 原方法体内部局部变量沿用 var 推断，不出现接口名。</summary>
     void RecolorPaintAll(object docBox)
     {
         try
         {
-            if (docBox is not Microsoft.UI.Text.ITextDocument) return;
+            // ITextDocument 是 WinUI 内部接口（非 public），类型名不能出现在
+            // 任何表达式里（含 is/cast）——CS0122。全部经反射或已具名封装走
+            if (docBox is null) return;
+            var docType = docBox.GetType();
+            var getRange = docType.GetMethod("GetRange", new[] { typeof(int), typeof(int) });
+            if (getRange is null) return;
             var text = RawText;
             // 幂等保证：文本没变说明上次已着好色，格式化都不做，
             // 杜绝任何"着色→事件→再着色"的循环
@@ -1851,12 +1858,15 @@ public sealed class CodeEditor : Grid
 
             // 整体重置为默认色：一次取区间同时清前景与背景，
             // 少一次全文档 GetRange 往返（大文件上收益明显）
-            var full = ((Microsoft.UI.Text.ITextDocument)docBox).GetRange(0, n);
-            full.CharacterFormat.ForegroundColor = _baseFg;
-            // 背景也要整体复位：编辑内核的插入会继承前一个字符的格式，
-            // 括号配对高亮的黄底会被紧随其后输入的内容继承，表现为
-            // "从括号开始所有内容都有背景色"。复位后由下方按需重亮。
-            full.CharacterFormat.BackgroundColor = _baseBg;
+            var full = getRange.Invoke(docBox, new object[] { 0, n });
+            // 复位整篇前景/背景：CharacterFormat 返回的格式对象同样非 public，
+            // 一律反射取值后写属性（失败则整体捕获，下轮重试）
+            var fmtObj = full?.GetType().GetProperty("CharacterFormat")?.GetValue(full);
+            if (fmtObj is not null)
+            {
+                fmtObj.GetType().GetProperty("ForegroundColor")?.SetValue(fmtObj, _baseFg);
+                fmtObj.GetType().GetProperty("BackgroundColor")?.SetValue(fmtObj, _baseBg);
+            }
 
             // 超大文档只保证默认色，不做分段着色（避免卡顿）
             if (text.Length > 300_000) return;
