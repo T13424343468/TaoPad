@@ -52,8 +52,10 @@ public sealed class ArticlePreview : ContentControl
             var head = lines[..MaxLines];
             if (langId == "fountain") RenderFountain(head);
             else RenderMarkdown(head);
-            _rtb.Blocks.Add(Block(new List<Inline> {
-                new Run { Text = $"…… 已截断：共 {lines.Length} 行，预览仅渲染前 {MaxLines} 行", Opacity = 0.6 } }, top: 12));
+            var noteRun = new Run { Text = $"…… 已截断：共 {lines.Length} 行，预览仅渲染前 {MaxLines} 行" };
+            if (Application.Current.Resources.TryGetValue("Ant.SubText", out var sub) && sub is Brush subBr)
+                noteRun.Foreground = subBr;
+            _rtb.Blocks.Add(Block(new List<Inline> { noteRun }, top: 12));
             return;
         }
         if (langId == "fountain") RenderFountain(lines);
