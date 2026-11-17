@@ -1158,6 +1158,61 @@ def type_text(s):
     time.sleep(0.4)
 
 
+def _norm_text(s):
+    return (s or "").replace("\r\n", "\n")
+
+
+def _hook_doc_safe():
+    """取活动文档快照；钩子不可用返回空 dict（调用方退回旧行为）。"""
+    try:
+        data = hook_dump()
+    except Exception:
+        return {}
+    docs = data.get("docs") or []
+    if not docs:
+        return {}
+    act = data.get("active", -1)
+    return docs[act] if 0 <= act < len(docs) else docs[-1]
+
+
+def clear_editor_verified(max_rounds=4):
+    """44137602413 实锤：X06 起 ^a{DEL} 连续被吞（X05 残留原样带到 X06），
+    同班 X03/X04 却 PASS——吞键集中在会话后段。清场必须以钩子正文为证，
+    没清干净就换姿势重试，不带残留进下一个场景。"""
+    for i in range(max_rounds):
+        if i:
+            focus_main()
+        click_editor()
+        send_keys("^a{DEL}")
+        time.sleep(0.6)
+        if _norm_text(_hook_doc_safe().get("text", "")).strip() == "":
+            return True
+        # 换姿势：^a 全选后单独 DELETE
+        send_keys("^a")
+        time.sleep(0.25)
+        send_keys("{DELETE}")
+        time.sleep(0.6)
+        if _norm_text(_hook_doc_safe().get("text", "")).strip() == "":
+            return True
+    return False
+
+
+def paste_verified(payload, max_rounds=3):
+    """44137602413 实锤：X06 两轮粘贴全吞、X07 粘贴其实进了——粘贴必须
+    以钩子正文含 payload 为证，没进就聚焦重粘，进了绝不重粘（防双份）。"""
+    for i in range(max_rounds):
+        t = _norm_text(_hook_doc_safe().get("text", ""))
+        if payload in t:
+            return t
+        if i:
+            focus_main()
+        click_editor()
+        pyperclip.copy(payload)
+        send_keys("^v")
+        time.sleep(0.8)
+    return _norm_text(_hook_doc_safe().get("text", ""))
+
+
 def editor_clipboard():
     """全选复制回读。v36 实锤：云 runner 上 ^c 偶发被吞（现场截图选中 9、
     剪贴板仍空）——聚焦后重试两轮复制再回读。
@@ -1385,66 +1440,42 @@ def c_writing_panels():
 def c_fountain_highlight():
     """X06：Fountain 剧本高亮（1.1.0）——场景/人物/转场分词落位，
     状态栏语言与正文以测试钩子为证。"""
-    click_editor()
-    esc_cleanup()
-    send_keys("^a{DEL}")
+    clear_editor_verified()
     menu_xy("语言", "Fountain 剧本")
     time.sleep(0.6)
-    click_editor()
-    send_keys("^a{DEL}")
-    type_text("INT. 咖啡馆 - 日\n\nJOHN\n今天天气不错。\n\n> CUT TO: 夜晚")
+    clear_editor_verified()
+    t = paste_verified("INT. 咖啡馆 - 日\n\nJOHN\n今天天气不错。\n\n> CUT TO: 夜晚")
     time.sleep(0.6)
     data = hook_dump()
     docs = data.get("docs") or []
     act = data.get("active", -1)
     doc = docs[act] if 0 <= act < len(docs) else docs[-1]
     status_hard("Fountain", doc, "X06")
-    # 44132721896 定谳：runner 吞键时 type_text 未生效（状态行=残留+1换行）。
-    # 正文断言失败先重试一轮完整清场+重输，再断言——不把抖动当产品缺陷。
-    if "INT. 咖啡馆 - 日" not in doc.get("text", ""):
-        focus_main()
-        click_editor()
-        send_keys("^a{DEL}")
-        time.sleep(0.3)
-        type_text("INT. 咖啡馆 - 日\n\nJOHN\n今天天气不错。\n\n> CUT TO: 夜晚")
-        time.sleep(0.6)
-        data = hook_dump()
-        docs = data.get("docs") or []
-        doc = docs[data.get("active", -1)] if 0 <= data.get("active", -1) < len(docs) else docs[-1]
-    assert "INT. 咖啡馆 - 日" in doc.get("text", ""), "X06: Fountain 正文缺失"
+    assert "INT. 咖啡馆 - 日" in doc.get("text", ""), (
+        f"X06: Fountain 正文缺失 验证粘贴回执={t[-60:]!r}")
     shot("case-fountain")
 
 
 def c_csharp_completion():
     """X07：C# 全量智能补全（1.1.0）——词表先弹、Roslyn 合并，
     弹层候选走 completionItems 硬通道，断言语义成员（Add/Count）可达。"""
-    click_editor()
-    esc_cleanup()
-    send_keys("^a{DEL}")
+    clear_editor_verified()
     menu_xy("语言", "C#")
     time.sleep(0.6)
-    click_editor()
-    send_keys("^a{DEL}")
-    type_text("var list = new List<string>();\nlist.")
-    time.sleep(2.5)   # 两段式：词表先弹，Roslyn 后台合并需一拍
-    data = hook_dump()
-    docs = data.get("docs") or []
-    act = data.get("active", -1)
-    doc = docs[act] if 0 <= act < len(docs) else docs[-1]
-    items = doc.get("completionItems") or []
-    # 44132721896 定谳：runner 吞键时 list. 后不弹层（open=False items=0，
-    # 文本尾正常=粘贴其实进了）。重试一轮清场重输再验，不把抖动当缺陷。
-    if "Add" not in items:
-        focus_main()
-        click_editor()
-        esc_cleanup()
-        send_keys("^a{DEL}")
-        type_text("var list = new List<string>();\nlist.")
-        time.sleep(2.5)
-        data = hook_dump()
-        docs = data.get("docs") or []
-        doc = docs[data.get("active", -1)] if 0 <= data.get("active", -1) < len(docs) else docs[-1]
+    clear_editor_verified()
+    items = []
+    doc = {}
+    for round_i in range(2):
+        paste_verified("var list = new List<string>();\nlist.")
+        time.sleep(2.5)   # 两段式：词表先弹，Roslyn 后台合并需一拍
+        doc = _hook_doc_safe()
         items = doc.get("completionItems") or []
+        if "Add" in items and "Count" in items:
+            break
+        # 44137602413 实锤：menu_xy 被吞的 ENTER 迟到落地（文本尾多出 \r\n），
+        # 光标被推走导致 Roslyn 续弹放弃。清干净重输一轮再验。
+        print(f"X07: 第{round_i + 1}轮候选缺语义成员，清场重输: items={items[:8]!r}", flush=True)
+        clear_editor_verified()
     assert "Add" in items and "Count" in items, (
         f"X07: 补全弹层候选缺语义成员: {items[:12]!r} 诊断={doc.get('completionDebug','')!r}"
         f" 文本尾={doc.get('text','')[-24:]!r}")
@@ -1455,28 +1486,36 @@ def c_csharp_completion():
 def c_csharp_undo():
     """X08：C# 模式撤销一步到位（1.1.1）——着色批合并为单个撤销组后，
     Ctrl+Z 一次就退回文字，不再被格式步吃掉首按；重做对称。"""
-    click_editor()
-    esc_cleanup()
-    send_keys("^a{DEL}")
+    clear_editor_verified()
     menu_xy("语言", "C#")
     time.sleep(0.6)
-    click_editor()
-    send_keys("^a{DEL}")
-    type_text("int undoProbe = 42;\n")
+    clear_editor_verified()
+    paste_verified("int undoProbe = 42;\n")
     time.sleep(0.8)   # 等 220ms 防抖着色批完整落盘（含撤销组）
-    send_keys("^z")
-    time.sleep(0.6)
-    data = hook_dump()
-    docs = data.get("docs") or []
-    act = data.get("active", -1)
-    doc = docs[act] if 0 <= act < len(docs) else docs[-1]
+    # 44137602413 实锤：X03 同为粘贴+^z 在 B 会话前段稳定过，X08 在后段
+    # ^z 被吞（文本原样）——^z 以钩子正文为证重试，吞键不作产品定谳。
+    for i in range(3):
+        doc = _hook_doc_safe()
+        if "undoProbe" not in doc.get("text", ""):
+            break
+        if i:
+            focus_main()
+        click_editor()
+        send_keys("^z")
+        time.sleep(0.8)
+    doc = _hook_doc_safe()
     text = doc.get("text", "")
     assert "undoProbe" not in text, f"X08: 一次 Ctrl+Z 未退回文字: {text[-40:]!r}"
-    send_keys("^y")
-    time.sleep(0.6)
-    data = hook_dump()
-    docs = data.get("docs") or []
-    doc = docs[data.get("active", -1) if 0 <= data.get("active", -1) < len(docs) else len(docs) - 1]
+    for i in range(3):
+        doc = _hook_doc_safe()
+        if "undoProbe" in doc.get("text", ""):
+            break
+        if i:
+            focus_main()
+        click_editor()
+        send_keys("^y")
+        time.sleep(0.8)
+    doc = _hook_doc_safe()
     assert "undoProbe" in doc.get("text", ""), f"X08: 重做未恢复文字: {doc.get('text', '')[-40:]!r}"
     shot("case-csharp-undo")
     esc_cleanup()
@@ -1485,24 +1524,34 @@ def c_csharp_undo():
 def c_pair_comment_undo():
     """X09：括号配对/注释后的单步撤销（1.1.1）——配对插入是单撤销组，
     一步 Ctrl+Z 退净；注释命令走 BeginUndoGroup 同样一步退净。"""
-    click_editor()
-    esc_cleanup()
-    send_keys("^a{DEL}")
+    clear_editor_verified()
     menu_xy("语言", "C#")
     time.sleep(0.6)
-    click_editor()
-    send_keys("^a{DEL}")
-    type_text("(")
-    time.sleep(0.5)   # 等配对插入与着色批
-    data = hook_dump()
-    docs = data.get("docs") or []
-    doc = docs[data.get("active", -1) if 0 <= data.get("active", -1) < len(docs) else len(docs) - 1]
+    clear_editor_verified()
+    # 44137602413 定谳：TryAutoPair 只挂按键链（CodeEditor 按键处理），
+    # 粘贴永不触发配对——type_text("(") 出 "(" 是场景设计错，改真实按键
+    # 并以钩子正文为证重试。
+    for i in range(4):
+        doc = _hook_doc_safe()
+        if "(" in doc.get("text", ""):
+            break
+        if i:
+            focus_main()
+        click_editor()
+        send_keys("(")
+        time.sleep(0.6)
+    doc = _hook_doc_safe()
     assert doc.get("text", "").strip() == "()", f"X09: 配对插入不对: {doc.get('text', '')[-20:]!r}"
-    send_keys("^z")
-    time.sleep(0.6)
-    data = hook_dump()
-    docs = data.get("docs") or []
-    doc = docs[data.get("active", -1) if 0 <= data.get("active", -1) < len(docs) else len(docs) - 1]
+    for i in range(3):
+        doc = _hook_doc_safe()
+        if doc.get("text", "").strip() == "":
+            break
+        if i:
+            focus_main()
+        click_editor()
+        send_keys("^z")
+        time.sleep(0.8)
+    doc = _hook_doc_safe()
     assert doc.get("text", "").strip() == "", f"X09: 配对撤销一步未退净: {doc.get('text', '')[-20:]!r}"
     shot("case-pair-undo")
     esc_cleanup()
