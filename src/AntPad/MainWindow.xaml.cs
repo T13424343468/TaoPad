@@ -1,4 +1,4 @@
-using AntPad.Controls;
+﻿using AntPad.Controls;
 using AntPad.Models;
 using AntPad.Services;
 using AntPad.Syntax;
