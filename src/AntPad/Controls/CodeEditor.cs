@@ -962,6 +962,10 @@ public sealed class CodeEditor : Grid
     /// 仅 --testhook 握手时被调用，普通运行零调用。</summary>
     public List<string> PopupItems => _popup.IsOpen ? new List<string>(_items) : new List<string>();
 
+    /// <summary>补全诊断自报（仅 --testhook 握手时导出）：弹层开关、候选数、语义分析最近失败。</summary>
+    public string PopupDebug =>
+        $"open={_popup.IsOpen} items={_items.Count} lang={_lang.Id} intel={Services.CSharpIntel.LastError ?? "ok"}";
+
     /// <summary>云端验证通道：导出前 64 个括号位的实测渲染色（位置:R,G,B）。
     /// 仅 --testhook 启动且测试握手时被调用，普通运行零调用。</summary>
     public List<string> RenderedBracketColors()

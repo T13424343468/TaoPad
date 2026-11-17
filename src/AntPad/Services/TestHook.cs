@@ -28,6 +28,9 @@ public static class TestHook
         [JsonPropertyName("caretLine")] public int CaretLine { get; set; }
         [JsonPropertyName("caretColumn")] public int CaretColumn { get; set; }
         [JsonPropertyName("selectionLength")] public int SelectionLength { get; set; }
+        [JsonPropertyName("lang")] public string Lang { get; set; } = "";
+        [JsonPropertyName("statusText")] public string StatusText { get; set; } = "";
+        [JsonPropertyName("completionDebug")] public string CompletionDebug { get; set; } = "";
         // 彩虹括号硬通道（1.1.0）：前 64 个括号位的实测渲染色 "pos:R,G,B"，
         // 云测据此断言嵌套括号至少出现 2 种颜色（X04 用例）
         [JsonPropertyName("bracketColors")] public List<string> BracketColors { get; set; } = new();

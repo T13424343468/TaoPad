@@ -1311,6 +1311,20 @@ def toggle_panel(item, hotkey):
     time.sleep(0.6)
 
 
+def status_hard(token, doc, label):
+    """状态栏断言：UIA 读层为主，空返时退钩子状态行自报（run 44106717867
+    定谳：B 会话 texts() 只枚举到窗口标题，截图与 trace 回执证明状态栏
+    真实内容在场——读层瞎，不是应用瞎）。"""
+    ts = texts()
+    if any(token in t for t in ts):
+        return
+    st = doc.get("statusText") or ""
+    if token in st:
+        print(f"{label}: UIA 读层空返，钩子状态行命中: {st[:60]!r}", flush=True)
+        return
+    raise AssertionError(f"{label}: 状态栏缺[{token}] UIA={ts[:6]!r} 钩子状态行={st[:80]!r}")
+
+
 def c_writing_panels():
     """X05：Markdown 写作面板（1.1.0）——预览/大纲开启后正文与字数落位。"""
     click_editor()
@@ -1325,11 +1339,11 @@ def c_writing_panels():
     toggle_panel("预览", "^+p")
     toggle_panel("大纲", "^+o")
     time.sleep(1.0)
-    status_has(contains="字数")
     data = hook_dump()
     docs = data.get("docs") or []
     act = data.get("active", -1)
     doc = docs[act] if 0 <= act < len(docs) else docs[-1]
+    status_hard("字数", doc, "X05")
     assert "标题二" in doc.get("text", ""), f"X05: 正文缺失: {doc.get('text', '')[:80]!r}"
     shot("case-writing-panels")
     # 复位：关掉两个面板，不占后续用例的画面
@@ -1350,11 +1364,11 @@ def c_fountain_highlight():
     send_keys("^a{DEL}")
     type_text("INT. 咖啡馆 - 日\n\nJOHN\n今天天气不错。\n\n> CUT TO: 夜晚")
     time.sleep(0.6)
-    status_has(contains="Fountain")
     data = hook_dump()
     docs = data.get("docs") or []
     act = data.get("active", -1)
     doc = docs[act] if 0 <= act < len(docs) else docs[-1]
+    status_hard("Fountain", doc, "X06")
     assert "INT. 咖啡馆 - 日" in doc.get("text", ""), "X06: Fountain 正文缺失"
     shot("case-fountain")
 
@@ -1376,7 +1390,9 @@ def c_csharp_completion():
     act = data.get("active", -1)
     doc = docs[act] if 0 <= act < len(docs) else docs[-1]
     items = doc.get("completionItems") or []
-    assert "Add" in items and "Count" in items, f"X07: 补全弹层候选缺语义成员: {items[:12]!r}"
+    assert "Add" in items and "Count" in items, (
+        f"X07: 补全弹层候选缺语义成员: {items[:12]!r} 诊断={doc.get('completionDebug','')!r}"
+        f" 文本尾={doc.get('text','')[-24:]!r}")
     shot("case-csharp-intel")
     esc_cleanup()
 

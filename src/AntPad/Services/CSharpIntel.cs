@@ -56,10 +56,15 @@ public static class CSharpIntel
     {
         try
         {
-            return await Task.Run(() => GetCompletions(text, caret)).ConfigureAwait(false);
+            var r = await Task.Run(() => GetCompletions(text, caret)).ConfigureAwait(false);
+            LastError = null;
+            return r;
         }
-        catch { return null; }
+        catch (Exception ex) { LastError = $"{ex.GetType().Name}: {ex.Message}"; return null; }
     }
+
+    /// <summary>最近一次语义分析失败的自报（仅测试诊断用；成功或未跑为 null）。</summary>
+    public static string? LastError { get; private set; }
 
     static List<IntelItem>? GetCompletions(string text, int caret)
     {

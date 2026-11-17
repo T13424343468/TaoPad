@@ -1062,13 +1062,36 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
                 CaretLine = d.Editor.CaretLine,
                 CaretColumn = d.Editor.CaretColumn,
                 SelectionLength = d.Editor.SelectionLength,
+                Lang = d.Editor.SyntaxLanguage.Name,
             });
+            try { s.Docs[^1].StatusText = StatusLineFor(d); }
+            catch { /* 状态行自报失败不挡正文快照 */ }
             try { s.Docs[^1].BracketColors = d.Editor.RenderedBracketColors(); }
             catch { /* 颜色通道失败不挡正文快照 */ }
             try { s.Docs[^1].CompletionItems = d.Editor.PopupItems; }
             catch { /* 弹层通道失败不挡正文快照 */ }
+            try { s.Docs[^1].CompletionDebug = d.Editor.PopupDebug; }
+            catch { /* 诊断通道失败不挡正文快照 */ }
         }
         return s;
+    }
+
+    /// <summary>状态栏文字的确定性自报（与 UpdateStatus 的各栏内容一致，
+    /// 拼成一行；专供 --testhook 会话，绕开 UIA 读层空返）。</summary>
+    string StatusLineFor(Doc doc)
+    {
+        var e = doc.Editor;
+        var line = $"行 {e.CaretLine}，列 {e.CaretColumn}" + (doc.ReadOnly ? "（只读）" : "") +
+            $" 选中 {e.SelectionLength} 字符 {e.CharCount} 行数 {e.LineCount} " +
+            $"{(int)Math.Round(e.ZoomLevel * 100)}% {EncodingHelper.NameOf(doc.Enc, doc.Bom)} " +
+            (doc.Eol switch { "\r\n" => "CRLF", "\n" => "LF", _ => "CR" }) +
+            $" {e.SyntaxLanguage.Name}";
+        if (IsArticle(e.SyntaxLanguage))
+        {
+            var st = WritingDoc.CountWords(e.Text);
+            line += $" 字数 {st.Words} / 目标 {_wordGoal}" + (st.Words >= _wordGoal ? " ✔" : "");
+        }
+        return line;
     }
 
     /// <summary>
