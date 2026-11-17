@@ -1832,11 +1832,13 @@ public sealed class CodeEditor : Grid
     }
 
     /// <summary>重着色的全部落笔动作（默认色复位、分词上色、彩虹括号、
-    /// 列块重亮、括号匹配恢复）。由 Recolor 在单个撤销组内调用。</summary>
-    void RecolorPaintAll(Microsoft.UI.Text.ITextDocument doc)
+    /// 列块重亮、括号匹配恢复）。由 Recolor 在单个撤销组内调用。
+    /// 参数用 object 接——ITextDocument 非 public 类型不可出现在签名里。</summary>
+    void RecolorPaintAll(object docBox)
     {
         try
         {
+            if (docBox is not Microsoft.UI.Text.ITextDocument) return;
             var text = RawText;
             // 幂等保证：文本没变说明上次已着好色，格式化都不做，
             // 杜绝任何"着色→事件→再着色"的循环
@@ -1849,7 +1851,7 @@ public sealed class CodeEditor : Grid
 
             // 整体重置为默认色：一次取区间同时清前景与背景，
             // 少一次全文档 GetRange 往返（大文件上收益明显）
-            var full = doc.GetRange(0, n);
+            var full = ((Microsoft.UI.Text.ITextDocument)docBox).GetRange(0, n);
             full.CharacterFormat.ForegroundColor = _baseFg;
             // 背景也要整体复位：编辑内核的插入会继承前一个字符的格式，
             // 括号配对高亮的黄底会被紧随其后输入的内容继承，表现为
