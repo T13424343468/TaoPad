@@ -183,7 +183,11 @@ def rawwalk_texts(h):
             _pidbuf = ctypes.c_uint()
             ctypes.windll.user32.GetWindowThreadProcessId(int(h), ctypes.byref(_pidbuf))
             _pid = _pidbuf.value
-            cond = iuia.CreatePropertyElementCondition(UIA_ProcessIdPropertyId, _pid)
+            # 44217756849 实锤：第三参须为 VARIANT，裸 int 触发 comtypes
+            # AttributeError（RAWWALK4 ERR），整条原生检索分支报废——
+            # 菜单识别最强的名字来源自此全程缺席，直呼 MISS 率飙升。
+            from comtypes.automation import VARIANT
+            cond = iuia.CreatePropertyElementCondition(UIA_ProcessIdPropertyId, VARIANT(_pid))
             found = iuia.GetRootElement().FindAll(TreeScope_Descendants, cond)
             pid_names = []
             for k in range(found.Length):
@@ -1111,6 +1115,29 @@ def menu(*titles):
     print(f"菜单[{'>'.join(titles)}]两轮直呼失败，放弃键盘回退（v18 防误触退出）", flush=True)
 
 
+def menu_lang_verified(item, lang_id, rounds=3):
+    """44217756849 实锤：语言菜单切了不算数（X06 状态栏始终 Markdown、
+    X12 补全/提示链路全程没进 C#）。切换必须以钩子 lang 字段为验收，
+    鼠标通道与 UIA 直呼交替重试，直到 lang 真变或轮次耗尽。"""
+    for i in range(rounds):
+        if i == 0:
+            menu_click_mouse("语言", item)
+        elif i == 1:
+            menu("语言", item)
+        else:
+            menu_xy("语言", item)
+        deadline = time.time() + 4.0
+        while time.time() < deadline:
+            doc = _hook_doc_safe()
+            if doc.get("lang") == lang_id:
+                return True
+            time.sleep(1.0)
+    doc = _hook_doc_safe()
+    ok = doc.get("lang") == lang_id
+    print(f"menu_lang_verified[{item}] 终态 lang={doc.get('lang')!r} -> {ok}", flush=True)
+    return ok
+
+
 def texts():
     return worker_texts()
 
@@ -1541,8 +1568,11 @@ def c_fountain_highlight():
     """X06：Fountain 剧本高亮（1.1.0）——场景/人物/转场分词落位，
     状态栏语言与正文以测试钩子为证。"""
     editor_open_clean()
-    menu_click_mouse("语言", "Fountain 剧本")
-    time.sleep(0.6)
+    # 44217756849 实锤：切了菜单不等于切了语言——必须以钩子 lang 验收
+    if not menu_lang_verified("Fountain 剧本", "fountain"):
+        doc0 = _hook_doc_safe()
+        assert doc0.get("lang") == "fountain", (
+            f"X06: 语言未切到 Fountain: lang={doc0.get('lang')!r}")
     clear_editor_settled()
     t = paste_verified("INT. 咖啡馆 - 日\n\nJOHN\n今天天气不错。\n\n> CUT TO: 夜晚")
     time.sleep(0.6)
@@ -1560,17 +1590,42 @@ def c_csharp_completion():
     """X07：C# 全量智能补全（1.1.0）——词表先弹、Roslyn 合并，
     弹层候选走 completionItems 硬通道，断言语义成员（Add/Count）可达。"""
     editor_open_clean()
-    menu_click_mouse("语言", "C#")
-    time.sleep(0.6)
+    if not menu_lang_verified("C#", "csharp"):
+        doc0 = _hook_doc_safe()
+        assert doc0.get("lang") == "csharp", (
+            f"X07: 语言未切到 C#: lang={doc0.get('lang')!r}")
     clear_editor_settled()
     # 44212844089 实锤：整段粘贴后菜单迟到的 ENTER 挪了光标，Roslyn 回来时
     # sameCaret 不成立，续弹被静默丢弃。改为声明行粘贴落稳后 list. 用真实
     # 按键逐字敲——成员补全由键入路径触发，此后再无迟到键可挪光标。
+    # 44217756849 再补一刀：迟到的重放 ENTER 会在 list. 之后多落 \r\n，
+    # 正文尾不再是 list.（弹层被收）——键入必须以钩子正文尾验收，脏则重试。
     paste_verified("var list = new List<string>();")
     time.sleep(1.0)
     send_keys("{END}{ENTER}")
     time.sleep(0.8)
-    send_keys("list.")
+    typed = False
+    for attempt in range(3):
+        send_keys("list.")
+        deadline = time.time() + 8
+        doc = _hook_doc_safe()
+        while time.time() < deadline:
+            doc = _hook_doc_safe()
+            if (doc.get("text") or "").endswith("list."):
+                typed = True
+                break
+            time.sleep(1.0)
+        if typed:
+            break
+        print(f"X07: 第{attempt + 1}轮键入未落账/正文尾脏: {doc.get('text', '')[-30:]!r}", flush=True)
+        focus_main()
+        click_editor()
+        clear_editor_settled()
+        paste_verified("var list = new List<string>();")
+        time.sleep(0.8)
+        send_keys("{END}{ENTER}")
+        time.sleep(0.6)
+    assert typed, f"X07: 键入三轮未落账: {(doc or {}).get('text', '')[-30:]!r}"
     doc = {}
     items = []
     deadline = time.time() + 30
@@ -1658,14 +1713,18 @@ def c_pair_comment_undo():
         print(f"X09: 第{i + 1}次发送 +9 后: {_stable()!r}", flush=True)
     t = _stable()
     assert t == "()", f"X09: 配对插入不对: {t[-20:]!r}"
-    # 撤销按状态机走：()→退一组；'(()'→先退多余插入组再续，直至退净
-    for i in range(4):
+    # 撤销按状态机走：()→退一组；'(()'→先退迟到重放多插的组再续，直至退净。
+    # 44217756849 实锤：撤销中途仍有迟到重放的 '(' 插队（'(()' 反复），4 轮
+    # 不够用——按「读数稳且非空就再退」走，上限 8 轮防呆。
+    time.sleep(1.5)
+    t = _stable()
+    for i in range(8):
         if t == "":
             break
         focus_main()
         click_editor()
         send_keys("^z")
-        time.sleep(1.0)
+        time.sleep(1.2)
         t = _stable()
         print(f"X09: 撤销第{i + 1}轮后: {t!r}", flush=True)
     assert t == "", f"X09: 配对撤销一步未退净: {t[-20:]!r}"
@@ -1687,17 +1746,29 @@ def c_snapshot_ui():
     """X10：快照留底（1.1.1）——立即留底命令真实落盘（新快照含探测正文），
     查看快照对话框可开（XAML 对话框无钩子通道，以截图为证）。"""
     editor_open_clean()
-    menu_click_mouse("语言", "纯文本")
-    time.sleep(0.4)
+    # 44217756849 实锤：语言切没切必须验收（同 X06/X07）
+    if not menu_lang_verified("纯文本", "plain"):
+        doc0 = _hook_doc_safe()
+        assert doc0.get("lang") == "plain", (
+            f"X10: 语言未切到纯文本: lang={doc0.get('lang')!r}")
     clear_editor_settled()
     probe = f"snapshot-probe-{int(time.time())}"
     paste_verified(probe)
     before = _snapshot_files()
-    if not menu_click_mouse("文件", "立即留底"):
-        menu_xy("文件", "立即留底")
-    time.sleep(1.5)
-    new = _snapshot_files() - before
-    assert new, f"立即留底未产生新快照: before={len(before)}"
+    # 44217756849 实锤：单通道菜单必 MISS——鼠标/直呼交替三轮，以快照
+    # 真实落盘为验收（文件菜单不走键盘导航，防误触退出）。
+    new = set()
+    for i in range(3):
+        if i == 0:
+            menu_click_mouse("文件", "立即留底")
+        else:
+            menu("文件", "立即留底")
+        time.sleep(1.5)
+        new = _snapshot_files() - before
+        if new:
+            break
+        print(f"X10: 第{i + 1}轮留底未落盘（before={len(before)}），换通道重试", flush=True)
+    assert new, f"立即留底三轮未产生新快照: before={len(before)}"
     hit = any(probe in open(p2, encoding="utf-8", errors="ignore").read() for p2 in new)
     assert hit, f"新快照不含探测正文: {[os.path.basename(x) for x in new]!r}"
     if not menu_click_mouse("文件", "查看快照…"):
@@ -1738,17 +1809,43 @@ def c_param_hint():
     """X12：参数提示浮层（1.1.1）——C# 键入 Math.Abs( 出签名提示，
     浮层状态走钩子硬通道 hintDebug 断言。"""
     editor_open_clean()
-    menu_click_mouse("语言", "C#")
-    time.sleep(0.6)
+    if not menu_lang_verified("C#", "csharp"):
+        doc0 = _hook_doc_safe()
+        assert doc0.get("lang") == "csharp", (
+            f"X12: 语言未切到 C#: lang={doc0.get('lang')!r}")
     clear_editor_settled()
     paste_verified("int probe = 1;")
     time.sleep(0.8)
     send_keys("{END}{ENTER}")
     time.sleep(0.6)
-    send_keys("Math.Abs")
-    send_keys("{ESC}")          # 收掉补全弹层，给参数提示让路（两浮层互斥）
-    time.sleep(0.4)
-    send_keys("+9")             # 真实按键敲 (，触发提示（粘贴不触发）
+    # 44217756849 实锤：吞键后 hintDebug 全程 open=False——键入必须以钩子
+    # 正文为验收：先见 Math.Abs、再见 Math.Abs( 才准等提示；脏则重敲。
+    typed = False
+    for attempt in range(3):
+        send_keys("Math.Abs")
+        deadline = time.time() + 8
+        doc = _hook_doc_safe()
+        while time.time() < deadline:
+            doc = _hook_doc_safe()
+            if "Math.Abs" in (doc.get("text") or ""):
+                break
+            time.sleep(1.0)
+        send_keys("{ESC}")      # 收掉补全弹层，给参数提示让路（两浮层互斥）
+        time.sleep(0.4)
+        send_keys("+9")         # 真实按键敲 (，触发提示（粘贴不触发）
+        deadline = time.time() + 8
+        while time.time() < deadline:
+            doc = _hook_doc_safe()
+            if "Math.Abs(" in (doc.get("text") or ""):
+                typed = True
+                break
+            time.sleep(1.0)
+        if typed:
+            break
+        print(f"X12: 第{attempt + 1}轮键入未落账: {(doc or {}).get('text', '')[-30:]!r}", flush=True)
+        focus_main()
+        click_editor()
+    assert typed, f"X12: '(' 三轮未落账: {(doc or {}).get('text', '')[-30:]!r}"
     doc = {}
     ok = False
     deadline = time.time() + 15
@@ -1767,25 +1864,39 @@ def c_param_hint():
 def c_readonly():
     """X13：只读文件（1.1.1）——只读档案打开后 readOnly 置位、状态行标注、
     键入被挡，钩子通道为证。"""
-    with open(FILE_RO, "w", encoding="utf-8") as f:
-        f.write("readonly-probe")
-    os.system(f'attrib +R "{FILE_RO}"')
-    esc_cleanup()
-    focus_main()
-    send_keys("^o")
-    time.sleep(0.6)
-    picker_typing(FILE_RO)
-    time.sleep(1.5)
-    doc = _hook_doc_safe()
-    assert doc.get("readOnly") is True, f"只读未置位: {doc.get('readOnly')!r}"
-    assert "（只读）" in doc.get("statusText", ""), f"状态行未标注只读: {doc.get('statusText', '')!r}"
-    click_editor()
-    send_keys("abc")
-    time.sleep(1.0)
-    doc = _hook_doc_safe()
-    assert "abc" not in doc.get("text", ""), "只读文件仍可键入"
+    # 44217756849 实锤：上一轮失败残留 +R 未清，重跑写文件必 PermissionError
+    # ——先清属性再落正文；打开必须以钩子 title/path 验收，脏则重开。
     os.system(f'attrib -R "{FILE_RO}"')
-    esc_cleanup()
+    try:
+        with open(FILE_RO, "w", encoding="utf-8") as f:
+            f.write("readonly-probe")
+        os.system(f'attrib +R "{FILE_RO}"')
+        esc_cleanup()
+        opened = False
+        for i in range(2):
+            focus_main()
+            send_keys("^o")
+            time.sleep(0.6)
+            picker_typing(FILE_RO)
+            time.sleep(1.5)
+            doc = _hook_doc_safe()
+            if ("taopad-ro.txt" in (doc.get("title") or "")
+                    or "taopad-ro.txt" in (doc.get("path") or "")):
+                opened = True
+                break
+            print(f"X13: 第{i + 1}次打开未命中: title={doc.get('title')!r}", flush=True)
+        assert opened, "X13: 只读文件两轮未打开"
+        doc = _hook_doc_safe()
+        assert doc.get("readOnly") is True, f"只读未置位: {doc.get('readOnly')!r}"
+        assert "（只读）" in doc.get("statusText", ""), f"状态行未标注只读: {doc.get('statusText', '')!r}"
+        click_editor()
+        send_keys("abc")
+        time.sleep(1.0)
+        doc = _hook_doc_safe()
+        assert "abc" not in doc.get("text", ""), "只读文件仍可键入"
+        esc_cleanup()
+    finally:
+        os.system(f'attrib -R "{FILE_RO}"')
 
 
 def c_startup():
