@@ -161,9 +161,11 @@ jobs:
           $regCmd = (Get-ItemProperty 'Registry::HKEY_CLASSES_ROOT\TaoPad.TextFile\shell\open\command' -ErrorAction Stop).'(default)'
           if (-not $regCmd) { throw "关联注册断：ProgId 无打开命令" }
           Write-Host "关联注册三实态全在：HKCR 默认值=$regDefault；命令=$regCmd"
-          $launchCmd = $regCmd.Replace('"%1"', [char]34 + $assocTxt + [char]34).Replace('%1', $assocTxt)
-          Write-Host "经注册命令唤起：$launchCmd"
-          Invoke-Expression $launchCmd
+          # 44310940578 教训：Invoke-Expression 吃不下带引号的整串命令，
+          # 改按解析出的 exe 路径 + 参数列表真实唤起（同一条注册命令）
+          if ($regCmd -match '^\s*"?([^"]+?\.exe)"?\s+"?%1"?\s*$') { $exePath = $Matches[1] } else { throw "注册命令解析失败：$regCmd" }
+          Write-Host "经注册命令唤起：$exePath + $assocTxt"
+          Start-Process -FilePath $exePath -ArgumentList ([char]34 + $assocTxt + [char]34)
           Start-Sleep -Seconds 12
           if (-not (Get-Process TaoPad -ErrorAction SilentlyContinue)) { throw "经注册命令唤起后 TaoPad 进程不在（真实启动链断）" }
           Snap "evidence\assoc-progid-launch.png"
