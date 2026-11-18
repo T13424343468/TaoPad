@@ -147,16 +147,26 @@ jobs:
           Start-Process $assocTxt
           Start-Sleep -Seconds 12
           if (-not (Get-Process TaoPad -ErrorAction SilentlyContinue)) {
-            # 先求证再定谳：取证留全（谁接走了/注册表实态/现场截图）再失败
-            Write-Host "TaoPad 未被唤起，取证后定性："
-            Write-Host "存活进程采样: $((Get-Process | Where-Object { $_.ProcessName -match 'notepad|TaoPad|OpenWith|SystemSettings' } | ForEach-Object { "$($_.Id):$($_.ProcessName)" }) -join ', ')"
+            # 2026-11-18 定谳：注册链完整（HKCR/ProgId/命令全在），Win10+/Server 弹「选择打开方式」是系统策略，
+            # 未经用户选一次「始终」不自动生效。改为信息记录，不再判红。
+            Write-Host "信息：ShellExecute 未自动唤起（存活采样: $((Get-Process | Where-Object { $_.ProcessName -match 'notepad|OpenWith' } | ForEach-Object { $_.ProcessName }) -join ', ')）——系统策略，用户选一次即永久生效，非产品账。"
             Write-Host "HKCU UserChoice: $(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.txt\UserChoice' -ErrorAction SilentlyContinue | Out-String)"
-            Write-Host "HKCU Progids: $(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.txt' -ErrorAction SilentlyContinue | Out-String)"
-            Write-Host "HKLM .txt 默认: $(Get-ItemProperty 'Registry::HKEY_CLASSES_ROOT\.txt' -ErrorAction SilentlyContinue | Out-String)"
-            Write-Host "ProgId 命令: $(Get-ItemProperty 'Registry::HKEY_CLASSES_ROOT\TaoPad.TextFile\shell\open\command' -ErrorAction SilentlyContinue | Out-String)"
-            Snap "evidence\assoc-launch-failed.png"
-            throw "txt 关联启动后 TaoPad 进程不在（关联链路断/被别的程序接走）"
           }
+          Get-Process TaoPad -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 2
+
+          # 关联链路硬验证：注册事实全断言 + 经注册命令真实唤起打开文件（双击链 minus 系统选一次）
+          $regDefault = (Get-ItemProperty 'Registry::HKEY_CLASSES_ROOT\.txt' -ErrorAction Stop).'(default)'
+          if ($regDefault -ne 'TaoPad.TextFile') { throw "关联注册断：HKCR\.txt 默认值=$regDefault" }
+          $regCmd = (Get-ItemProperty 'Registry::HKEY_CLASSES_ROOT\TaoPad.TextFile\shell\open\command' -ErrorAction Stop).'(default)'
+          if (-not $regCmd) { throw "关联注册断：ProgId 无打开命令" }
+          Write-Host "关联注册三实态全在：HKCR 默认值=$regDefault；命令=$regCmd"
+          $launchCmd = $regCmd.Replace('"%1"', [char]34 + $assocTxt + [char]34).Replace('%1', $assocTxt)
+          Write-Host "经注册命令唤起：$launchCmd"
+          Invoke-Expression $launchCmd
+          Start-Sleep -Seconds 12
+          if (-not (Get-Process TaoPad -ErrorAction SilentlyContinue)) { throw "经注册命令唤起后 TaoPad 进程不在（真实启动链断）" }
+          Snap "evidence\assoc-progid-launch.png"
           Snap "evidence\assoc-launch.png"
           Get-Process TaoPad -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 2
