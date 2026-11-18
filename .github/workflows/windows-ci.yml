@@ -130,6 +130,18 @@ jobs:
           Start-Sleep -Seconds 2
 
           Write-Host "关联通道实测：ShellExecute 走系统注册表（= 双击/打开方式同链路）"
+          # 先把这台机器的默认打开方式设成 TaoPad（等效用户装完点「始终用这个」）：
+          # 1) 清掉用户级旧选择 2) DISM 导入机器级默认关联 3) 再走真实双击链路
+          Remove-Item "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.txt\UserChoice" -ErrorAction SilentlyContinue
+          $assocXml = Join-Path $env:RUNNER_TEMP "taopad-assoc.xml"
+          Set-Content -Path $assocXml -Encoding UTF8 -Value @'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <DefaultAssociations>
+            <Association ApplicationName="TaoPad" ProgId="TaoPad.TextFile" Identifier=".txt" />
+          </DefaultAssociations>
+          '@
+          Dism /Online /Import-DefaultAppAssociations:"$assocXml" | Out-Host
+          Dism /Online /Get-DefaultAppAssociations | Select-String "txt" | Out-Host
           $assocTxt = Join-Path $env:USERPROFILE "Documents\taopad-assoc.txt"
           Set-Content -Path $assocTxt -Value "assoc-probe-734912" -Encoding UTF8
           Start-Process $assocTxt
