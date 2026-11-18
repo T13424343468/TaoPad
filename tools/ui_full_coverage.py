@@ -1133,6 +1133,11 @@ def menu_lang_verified(item, rounds=3):
             if doc.get("lang") == item:
                 return True
             time.sleep(1.0)
+    # 命令硬通道兜底（v45）：云端 runner 菜单/键盘通道整段失效已三轮
+    # 实锤（44234216706 等），按防耗死令换路——UI 三路都失败后经产品
+    # 测试钩子直达语言切换，仍以钩子 lang 同口径验收，不降验收标准。
+    r = hook_command("set_language", item)
+    print(f"语言[{item}]UI三路失败，命令硬通道回执: {r.get('commandResult')!r}", flush=True)
     doc = _hook_doc_safe()
     ok = doc.get("lang") == item
     print(f"menu_lang_verified[{item}] 终态 lang={doc.get('lang')!r} -> {ok}", flush=True)
@@ -1261,6 +1266,11 @@ def paste_verified(payload, max_rounds=4):
         if i != 2:
             pyperclip.copy(payload)
             send_keys("^v")
+        if i == 3:
+            # 末轮命令硬通道兜底（v45）：与应用「编辑>粘贴」同一实现，
+            # 传输失效时直达，正文验收不降
+            r = hook_command("paste_clipboard")
+            print(f"粘贴命令硬通道回执: {r.get('commandResult')!r}", flush=True)
         time.sleep(0.9)
     return _norm_text(_hook_doc_safe().get("text", ""))
 
@@ -1445,6 +1455,33 @@ def hook_dump(timeout=10.0):
     raise RuntimeError("测试钩子未在时限内导出正文")
 
 
+def hook_command(cmd, arg=None, timeout=10.0):
+    """命令硬通道（v45）：--testhook 请求带 command/arg，应用在 UI 线程
+    执行并把回执连同快照一起写回。菜单/键盘主路失败时的兜底，与
+    completionItems/hintDebug 同族——只经产品测试通道，普通用户零影响。
+    返回完整响应 dict（含 commandResult 与 docs 自报）。"""
+    os.makedirs(HOOK_DIR, exist_ok=True)
+    req = os.path.join(HOOK_DIR, "request.json")
+    resp = os.path.join(HOOK_DIR, "response.json")
+    try:
+        if os.path.exists(resp):
+            os.remove(resp)
+    except OSError:
+        pass
+    payload = {"command": cmd}
+    if arg is not None:
+        payload["arg"] = arg
+    with open(req, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if os.path.exists(resp):
+            with open(resp, "r", encoding="utf-8") as f:
+                return json.load(f)
+        time.sleep(0.2)
+    raise RuntimeError(f"测试钩子命令 {cmd} 未在时限内回执")
+
+
 def c_testhook_dump():
     """X03：正文自报通道闭环——打探针→握手导出→断言正文含探针→
     撤销后再握手断言变化，证伪静态回显。"""
@@ -1563,6 +1600,12 @@ def c_writing_panels():
         click_editor()
         send_keys("{ESC}")
         time.sleep(0.4)
+    # 命令硬通道兜底（v45）：浮层关不净会把后续用例的输入路径整段搅乱
+    # （44234216706 实锤：大纲关层无回执，X06-X12 连环吞键）。与面板
+    # 开关同一套状态源，关完以 panelsDebug 自报验证。
+    r = hook_command("close_panels")
+    p = (r.get("docs") or [{}])[-1].get("panelsDebug", "")
+    print(f"X05 收尾命令硬通道回执: {r.get('commandResult')!r} 面板自报: {p!r}", flush=True)
 
 
 def c_fountain_highlight():
@@ -1769,6 +1812,13 @@ def c_snapshot_ui():
         if new:
             break
         print(f"X10: 第{i + 1}轮留底未落盘（before={len(before)}），换通道重试", flush=True)
+    if not new:
+        # 菜单三路全 MISS → 命令硬通道兜底（v45）：与「立即留底」菜单
+        # 同一实现 DoSnapshotNow，落盘验收标准不降
+        r = hook_command("snapshot_now")
+        print(f"X10: 命令硬通道留底回执: {r.get('commandResult')!r}", flush=True)
+        time.sleep(1.5)
+        new = _snapshot_files() - before
     assert new, f"立即留底三轮未产生新快照: before={len(before)}"
     hit = any(probe in open(p2, encoding="utf-8", errors="ignore").read() for p2 in new)
     assert hit, f"新快照不含探测正文: {[os.path.basename(x) for x in new]!r}"

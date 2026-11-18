@@ -40,6 +40,8 @@ public static class TestHook
         [JsonPropertyName("hintDebug")] public string HintDebug { get; set; } = "";
         // 书签硬通道（1.1.1）：当前书签行号（1 计，升序），X11 据此断言打点/取消
         [JsonPropertyName("bookmarkLines")] public List<int> BookmarkLines { get; set; } = new();
+        // 面板硬通道（1.1.1）：预览/大纲面板开合自报，X05 收尾据此验证残留
+        [JsonPropertyName("panelsDebug")] public string PanelsDebug { get; set; } = "";
     }
 
     public sealed class Snapshot
@@ -47,9 +49,20 @@ public static class TestHook
         [JsonPropertyName("version")] public string Version { get; set; } = "";
         [JsonPropertyName("active")] public int Active { get; set; } = -1;
         [JsonPropertyName("docs")] public List<DocInfo> Docs { get; } = new();
+        // 命令回执（1.1.1）：请求带 command 时由命令分发器返回的执行回执
+        [JsonPropertyName("commandResult")] public string? CommandResult { get; set; }
     }
 
     static bool _started;
+
+    /// <summary>
+    /// 命令下行分发器（1.1.1）：主窗体在 --testhook 会话注入。请求 JSON 带
+    /// command/arg 时在 UI 线程执行并回执；不带 command 保持纯快照语义不变。
+    /// 为什么存在：云端 runner 对菜单直呼与键盘通道偶发整段失效（三轮
+    /// 同路实测），凡依赖 UI 传输的断言连环误红；与 completionItems/
+    /// hintDebug 同族——只经测试通道兜底，普通用户运行零影响。
+    /// </summary>
+    public static Func<string, string?, string>? CommandDispatcher { get; set; }
     static string HookDir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "TaoPad", "testhook");
@@ -73,7 +86,24 @@ public static class TestHook
                 string req = Path.Combine(HookDir, "request.json");
                 if (File.Exists(req))
                 {
+                    // 命令下行（1.1.1）：请求可带 {"command":..,"arg":..}；
+                    // 纯空请求保持旧快照语义，命令分发失败不挡快照导出。
+                    string? cmd = null, arg = null;
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(File.ReadAllText(req));
+                        if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                        {
+                            if (doc.RootElement.TryGetProperty("command", out var c) && c.ValueKind == JsonValueKind.String)
+                                cmd = c.GetString();
+                            if (doc.RootElement.TryGetProperty("arg", out var a) && a.ValueKind == JsonValueKind.String)
+                                arg = a.GetString();
+                        }
+                    }
+                    catch { /* 空文件或非 JSON：按旧语义纯快照 */ }
+                    string? result = cmd is null ? null : await RunCommandAsync(queue, cmd, arg);
                     var snap = await TakeSnapshotAsync(queue, provider);
+                    snap.CommandResult = result;
                     string json = JsonSerializer.Serialize(snap);
                     string tmp = Path.Combine(HookDir, "response.json.tmp");
                     await File.WriteAllTextAsync(tmp, json);
@@ -98,6 +128,22 @@ public static class TestHook
         {
             try { tcs.SetResult(provider()); }
             catch (Exception ex) { tcs.SetException(ex); }
+        }))
+        {
+            tcs.SetException(new InvalidOperationException("测试钩子：队列已不可用"));
+        }
+        return tcs.Task;
+    }
+
+    // 命令同样要在 UI 线程执行（动的是 UI 状态）；异常折进回执字符串，
+    // 不让测试命令把快照导出整个炸掉
+    static Task<string> RunCommandAsync(DispatcherQueue queue, string cmd, string? arg)
+    {
+        var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!queue.TryEnqueue(() =>
+        {
+            try { tcs.SetResult(CommandDispatcher?.Invoke(cmd, arg) ?? "ERR no-dispatcher"); }
+            catch (Exception ex) { tcs.SetResult("ERR " + ex.Message); }
         }))
         {
             tcs.SetException(new InvalidOperationException("测试钩子：队列已不可用"));

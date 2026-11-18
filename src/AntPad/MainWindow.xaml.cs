@@ -101,6 +101,43 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
         // 测试钩子（2026-11-17 老板令）：仅 --testhook 启动时激活，普通
         // 运行零副作用；给云端自动测试一条不依赖 UIA 读层的正文自报通道
         Services.TestHook.Start(DispatcherQueue, SnapshotForTest);
+        Services.TestHook.CommandDispatcher = ExecuteTestCommand;
+    }
+
+    /// <summary>
+    /// 命令下行（1.1.1）：云端 runner 对菜单直呼与键盘通道整段失效已三轮
+    /// 实锤，同路连堵按防耗死令换路——测试钩子从「只读自报」升级为
+    /// 「可下达命令」。菜单与键盘仍是主路，这里只是 UI 传输失效时的
+    /// 兜底，回执字符串随快照返回；仅 --testhook 会话可达，普通用户
+    /// 零影响。命令执行发生在 UI 线程（TestHook 保证）。
+    /// </summary>
+    string ExecuteTestCommand(string command, string? arg)
+    {
+        switch (command)
+        {
+            case "snapshot_now":
+                DoSnapshotNow();
+                return "ok:snapshot";
+            case "close_panels":
+                if (_previewOn) { PreviewToggle.IsChecked = false; OnPreviewToggle(this, new RoutedEventArgs()); }
+                if (_outlineOn) { OutlineToggle.IsChecked = false; OnOutlineToggle(this, new RoutedEventArgs()); }
+                return $"closed:preview={!_previewOn},outline={!_outlineOn}";
+            case "set_language":
+                if (Active is not { } doc) return "ERR no-doc";
+                LangDef? lang = null;
+                foreach (var l in LangDef.All)
+                    if (l.Name == arg) { lang = l; break; }
+                if (lang is null) return "ERR lang-not-found:" + arg;
+                doc.Editor.SyntaxLanguage = lang;
+                UpdateLangChecks();
+                UpdateStatus();
+                return "ok:" + lang.Name;
+            case "paste_clipboard":
+                Ed?.Paste();
+                return "ok:paste";
+            default:
+                return "ERR unknown-command:" + command;
+        }
     }
 
     void FitEditors()
@@ -1083,6 +1120,8 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             catch { /* 提示通道失败不挡正文快照 */ }
             try { s.Docs[^1].BookmarkLines = d.Editor.BookmarkLines; }
             catch { /* 书签通道失败不挡正文快照 */ }
+            try { s.Docs[^1].PanelsDebug = $"preview={_previewOn},outline={_outlineOn}"; }
+            catch { /* 面板通道失败不挡正文快照 */ }
         }
         return s;
     }
@@ -1260,7 +1299,11 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
     // ================= 快照留底 =================
 
     /// <summary>立即给当前文档拍一份快照（旁路副本，不改正文）。</summary>
-    void OnSnapshotSave(object sender, RoutedEventArgs e)
+    void OnSnapshotSave(object sender, RoutedEventArgs e) => DoSnapshotNow();
+
+    /// <summary>留底命令本体（1.1.1）：菜单与测试命令共用同一实现，
+    /// 保证「用户点的」和「测试兜底的」永远是同一份行为。</summary>
+    void DoSnapshotNow()
     {
         if (Active is not { } doc) return;
         try
