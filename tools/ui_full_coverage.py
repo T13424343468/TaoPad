@@ -1692,27 +1692,24 @@ def c_csharp_completion():
                 last = None
         time.sleep(1.0)
     assert typed, f"X07: 键入未落账: {(doc or {}).get('text', '')[-40:]!r}"
-    # 44257837793 实锤：幽灵键流持续污染尾随换行，分步「清尾→读候选」永远
-    # 赶不上污染速度——改走原子命令 trim_and_items（UI 线程内清尾+触发+读
-    # 候选一次成型），只要空出一拍就能拿全候选。
-    # v46k（44310940578 X07 实锤）：csharp 词表空时弹层两段式——list. 后
-    # MaybeShowPopup 走 Roslyn 异步合并，回调后才 ShowPopup；测试同步瞬读
-    # 永远早于回执。改为 trim_and_items 打一次底触发，再轮询 popup_items
-    # 直到 Roslyn 回执落地（60s 时限）。
+    # v46l（44317775556 X07 实锤）：trim_and_items 依赖文本变化触发，正文
+    # 已净时不再引发 MaybeShowPopup，Roslyn 回执被 sameCaret 丢弃后轮询
+    # 永远空表。改为 trim_and_items 先剥幽灵尾（这一次文本变化即触发），
+    # 再每轮 trigger_popup（不改正文触发判定）+ popup_items，语义回执
+    # 落地、弹层打开后即见 Add/Count（60s 时限）
     res = ""
     ok = False
-    r = hook_command("trim_and_items")
-    res = r.get("commandResult") or ""
-    if res.startswith("ok:items=[") and "Add" in res and "Count" in res:
-        ok = True
+    hook_command("trim_and_items")
     deadline = time.time() + 60
-    while not ok and time.time() < deadline:
+    while time.time() < deadline:
+        hook_command("trigger_popup")
+        time.sleep(2.0)
         r = hook_command("popup_items")
         res = r.get("commandResult") or ""
         if res.startswith("ok:items=[") and "Add" in res and "Count" in res:
             ok = True
             break
-        time.sleep(2.0)
+        time.sleep(1.0)
     if not ok:
         doc = _try_hook_dump(timeout=25.0) or {}
     assert ok, (f"X07: 补全弹层候选缺语义成员: {res[:160]!r}"
@@ -2269,13 +2266,15 @@ def trace_mark():
 
 
 def trace_since(mark):
-    """trace.log 自 mark 行之后的新增行：应用侧真实事件回执（菜单点开/按下、设置流）"""
+    """trace.log 自 mark 行之后的新增行：应用侧真实事件回执（菜单点开/按下、
+    设置流）。v46l：不再「读到第一个存在文件就停」——两处候选目录里旧文件
+    可能存在但已停写，只看它会永远空表（44317775556 X17 首跑 45s 空轮询
+    实锤）；改为所有路径都取增量后合并。"""
     out = []
     for p in TRACE_PATHS:
         try:
             with open(p, encoding="utf-8", errors="replace") as f:
-                out = [l.rstrip("\r\n") for l in f.readlines()[mark:]]
-            break
+                out.extend(l.rstrip("\r\n") for l in f.readlines()[mark:])
         except OSError:
             continue
     if out:
@@ -3591,11 +3590,26 @@ def c_external_change():
     干净档案弹「文件已在外部修改」对话框（ESC=暂不，内容不丢）；有未保存
     改动时仅提醒不打断。断言走 trace 留证（产品侧新增：检测到/对话框已
     确认/未保存仅提醒）。"""
-    p = os.path.join(DOCS, "taopad-watch.txt")
+    # v46l（44317775556 X17 实锤）：OpenPaths 对已开路径只切标签不重载，
+    # 重跑复用上一场的标签、内容还是上一场的旧正文，之后所有断言全歪。
+    # 改为每场用唯一文件名（新标签、新加载），杜绝复用
+    p = os.path.join(DOCS, f"taopad-watch-{int(time.time()*1000)}.txt")
     with open(p, "w", encoding="utf-8") as f:
         f.write("watch-probe-v1\n")
     esc_cleanup()
     _forward_open(p)
+    # v46l（44317775556 X17 实锤）：打开是异步加载，若 v2 外部写先于加载
+    # 落盘，编辑器起步就是 v2，之后「暂不保持 v1」断言必炸。加同步栏：
+    # 轮询钩子正文直到确见 v1 才动 mark、才写 v2
+    barrier_ok = False
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        d = _hook_doc_safe()
+        if "watch-probe-v1" in (d.get("text") or ""):
+            barrier_ok = True
+            break
+        time.sleep(1.0)
+    assert barrier_ok, "X17: 打开后 30s 未确见 v1 正文（加载链未走通）"
     mark = trace_mark()
     # 干净档案：外部改 → 弹对话框 → ESC 暂不 → 正文保持 v1
     with open(p, "w", encoding="utf-8") as f:

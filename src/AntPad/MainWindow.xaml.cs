@@ -160,6 +160,13 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
                 // X07 实锤 items=[]）。让测试反复读直到 Roslyn 回执落地
                 if (Active is not { } docPI) return "ERR no-doc";
                 return "ok:items=[" + string.Join(",", docPI.Editor.PopupItems) + "]";
+            case "trigger_popup":
+                // v46l：不改正文反复触发补全判定。44317775556 X07 实锤：
+                // trim_and_items 依赖文本变化触发，正文已净时不再引发
+                // MaybeShowPopup，Roslyn 回执被 sameCaret 丢弃后永远空表
+                if (Active is not { } docTP) return "ERR no-doc";
+                docTP.Editor.TriggerCompletionPopup();
+                return "ok:popup-trig";
             default:
                 return "ERR unknown-command:" + command;
         }

@@ -967,6 +967,12 @@ public sealed class CodeEditor : Grid
     public string PopupDebug =>
         $"open={_popup.IsOpen} items={_items.Count} lang={_lang.Id} intel={Services.CSharpIntel.LastError ?? "ok"}";
 
+    /// <summary>云端验证通道：主动触发一次补全判定（等价再次输入引发
+    /// MaybeShowPopup，但不改动正文）。两段式的第二段（Roslyn 回执）要求
+    /// 光标未动才续弹，测试轮询时用它在正文不动的前提下反复触发。
+    /// 仅 --testhook 握手时被调用，普通运行零调用。</summary>
+    public void TriggerCompletionPopup() => MaybeShowPopup();
+
     /// <summary>云端验证通道：参数提示浮层状态（开关 + 最近一次签名函数名）。</summary>
     public string HintDebug => $"open={_hintPopup.IsOpen} hint={_lastHintName}";
 
