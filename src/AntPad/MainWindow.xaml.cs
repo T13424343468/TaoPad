@@ -1074,6 +1074,10 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             catch { /* 弹层通道失败不挡正文快照 */ }
             try { s.Docs[^1].CompletionDebug = d.Editor.PopupDebug; }
             catch { /* 诊断通道失败不挡正文快照 */ }
+            try { s.Docs[^1].HintDebug = d.Editor.HintDebug; }
+            catch { /* 提示通道失败不挡正文快照 */ }
+            try { s.Docs[^1].BookmarkLines = d.Editor.BookmarkLines; }
+            catch { /* 书签通道失败不挡正文快照 */ }
         }
         return s;
     }

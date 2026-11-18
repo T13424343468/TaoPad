@@ -71,6 +71,7 @@ public sealed class CodeEditor : Grid
     readonly Border _popupBorder;
     readonly StackPanel _listPanel;
     readonly Popup _hintPopup;      // 参数提示浮层
+    string _lastHintName = "";  // 最近一次参数提示的函数名（测试通道用）
     readonly Border _hintBorder;
     readonly TextBlock _hintText;
     readonly List<string> _items = new();
@@ -965,6 +966,12 @@ public sealed class CodeEditor : Grid
     /// <summary>补全诊断自报（仅 --testhook 握手时导出）：弹层开关、候选数、语义分析最近失败。</summary>
     public string PopupDebug =>
         $"open={_popup.IsOpen} items={_items.Count} lang={_lang.Id} intel={Services.CSharpIntel.LastError ?? "ok"}";
+
+    /// <summary>云端验证通道：参数提示浮层状态（开关 + 最近一次签名函数名）。</summary>
+    public string HintDebug => $"open={_hintPopup.IsOpen} hint={_lastHintName}";
+
+    /// <summary>云端验证通道：当前书签行号（1 计，升序）。</summary>
+    public List<int> BookmarkLines => Bookmarks.OrderBy(x => x).ToList();
 
     /// <summary>云端验证通道：导出前 64 个括号位的实测渲染色（位置:R,G,B）。
     /// 仅 --testhook 启动且测试握手时被调用，普通运行零调用。</summary>
@@ -2231,6 +2238,7 @@ public sealed class CodeEditor : Grid
             _hintPopup.HorizontalOffset = Math.Max(0, px);
             _hintPopup.VerticalOffset = Math.Max(0, py);
             if (!_hintPopup.IsOpen) _hintPopup.IsOpen = true;
+            _lastHintName = name;
             _hintKeep = true;                    // 本次文本变化刷新过提示，紧跟的选区事件不收起
         }
         catch { /* 提示失败不影响编辑 */ }
@@ -2238,7 +2246,7 @@ public sealed class CodeEditor : Grid
 
     void HideHint()
     {
-        if (_hintPopup.IsOpen) _hintPopup.IsOpen = false;
+        if (_hintPopup.IsOpen) { _hintPopup.IsOpen = false; _lastHintName = ""; }
     }
 
     // ---------- 列块（矩形）选区高亮与词出现高亮（仅着色内核） ----------

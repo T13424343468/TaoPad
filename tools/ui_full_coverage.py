@@ -930,21 +930,36 @@ def case(name, fn):
         record(name, "SKIP", "应用进程已消失，跳过余下用例（崩溃现场已收集到 crash-scene/）")
         return
     refocus_app()
+
+    def _run(tag):
+        """tag=1 首跑；tag=2 失败重跑。返回 True=过。首红只留痕不记档。"""
+        try:
+            fn()
+            record(name, True, "" if tag == 1 else "首跑失败重跑通过（环境吞击，非产品定谳）")
+            return True
+        except Exception as e:
+            msg = f"[{type(e).__name__}] {str(e)[:280]}"
+            shot(("FAIL1-" if tag == 1 else "FAIL-") + re.sub(r"[^0-9A-Za-z_-]", "_", name))
+            if tag == 2:
+                record(name, False, msg)
+            else:
+                print(f"[FAIL] {name}  --  {msg}（重跑一次再定谳）", flush=True)
+            return False
+        finally:
+            esc_cleanup()
+
     try:
-        fn()
-        record(name, True)
-    except Exception as e:
-        record(name, False, f"[{type(e).__name__}] {str(e)[:280]}")
-        shot("FAIL-" + re.sub(r"[^0-9A-Za-z_-]", "_", name))
-        if not app_alive():   # 用例失败后进程也没了：立即抓崩溃现场
+        if not _run(1):
+            # 44212844089 实锤：B 半场后段键入/菜单通道偶发吞击（X06 清场粘贴
+            # 四连吞）。失败重跑一次，仍红才定谳产品问题。
+            if app_alive():
+                refocus_app()
+                _run(2)
+    finally:
+        if not app_alive() and not DEAD_MARKED:
             DEAD_MARKED = True
             collect_crash_scene()
             shot("CRASH-scene-desktop")
-    finally:
-        # v31 治本（43592341121 实锤）：T01 断言抛出后主题下拉残留，把「编码」
-        # 菜单点击拖瘫两连败，_open_top_keyboard 兜底键序落进编辑器（C01 字节
-        # 尾部 \r 实锤），连坐 8 例。凡用例退出必清浮层，断言失败不得跨用例污染。
-        esc_cleanup()
 
 
 def find_exe():
@@ -1454,9 +1469,11 @@ def c_rainbow_brackets():
 
 
 def toggle_panel(item, hotkey):
-    """查看>预览/大纲 激活：菜单回执优先，无回执退 XAML 加速键（V01 热键兜底同法）。
-    run 44096504055 实锤：预览回执在、大纲 DOWN×4+ENTER 三次无回执（ENTER 落进
-    编辑器，X06 现场行数+1 佐证）——面板类目标有确定性热键，菜单路径失败即退。"""
+    """查看>预览/大纲 激活：纯鼠标直点优先（44149411449 实锤：menu_xy 通道一
+    DOWN/ENTER 迟到落进编辑器，是 X06/X07 尾随 CRLF 的源头之一），失败退
+    XAML 加速键。"""
+    if menu_click_mouse("查看", item):
+        return
     if menu_xy("查看", item):
         return
     print(f"{item} 菜单路径失败，退加速键 {hotkey}", flush=True)
@@ -1524,9 +1541,9 @@ def c_fountain_highlight():
     """X06：Fountain 剧本高亮（1.1.0）——场景/人物/转场分词落位，
     状态栏语言与正文以测试钩子为证。"""
     editor_open_clean()
-    menu_xy("语言", "Fountain 剧本")
+    menu_click_mouse("语言", "Fountain 剧本")
     time.sleep(0.6)
-    clear_editor_verified()
+    clear_editor_settled()
     t = paste_verified("INT. 咖啡馆 - 日\n\nJOHN\n今天天气不错。\n\n> CUT TO: 夜晚")
     time.sleep(0.6)
     data = hook_dump()
@@ -1546,27 +1563,23 @@ def c_csharp_completion():
     menu_click_mouse("语言", "C#")
     time.sleep(0.6)
     clear_editor_settled()
-    items = []
+    # 44212844089 实锤：整段粘贴后菜单迟到的 ENTER 挪了光标，Roslyn 回来时
+    # sameCaret 不成立，续弹被静默丢弃。改为声明行粘贴落稳后 list. 用真实
+    # 按键逐字敲——成员补全由键入路径触发，此后再无迟到键可挪光标。
+    paste_verified("var list = new List<string>();")
+    time.sleep(1.0)
+    send_keys("{END}{ENTER}")
+    time.sleep(0.8)
+    send_keys("list.")
     doc = {}
-    for round_i in range(2):
-        paste_verified("var list = new List<string>();\nlist.")
-        # 44145564951 实锤：2.5s 固定等待时词表段先弹（items=['List']），Roslyn
-        # 语义合并（冷启动加载分析器）在云 VM 上远不止一拍——轮询等合并完成
-        deadline = time.time() + 25
-        doc = {}
-        items = []
-        while time.time() < deadline:
-            doc = _hook_doc_safe()
-            items = doc.get("completionItems") or []
-            if "Add" in items and "Count" in items:
-                break
-            time.sleep(2.5)
+    items = []
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        doc = _hook_doc_safe()
+        items = doc.get("completionItems") or []
         if "Add" in items and "Count" in items:
             break
-        t = _norm_text(doc.get("text", ""))
-        print(f"X07: 第{round_i + 1}轮候选缺语义成员，清场重输: "
-              f"items={items[:8]!r} 文本尾={t[-20:]!r}", flush=True)
-        clear_editor_settled()
+        time.sleep(2.0)
     assert "Add" in items and "Count" in items, (
         f"X07: 补全弹层候选缺语义成员: {items[:12]!r} 诊断={doc.get('completionDebug','')!r}"
         f" 文本尾={doc.get('text','')[-24:]!r}")
@@ -1619,44 +1632,159 @@ def c_pair_comment_undo():
     menu_click_mouse("语言", "C#")
     time.sleep(0.6)
     clear_editor_settled()
-    # 44141628790 定谳：TryAutoPair 只挂按键链（CodeEditor 按键处理），
-    # 粘贴永不触发配对——type_text("(") 出 "(" 是场景设计错，改真实按键。
-    # pywinauto 把 ( 解析为修饰键分组符（KeySequenceError 实锤）；产品判定
-    # Shift+Number9（CodeEditor.cs 2476），US 布局发 +9 即命中同一虚拟键路径。
-    # 44149411449 实锤：+9 落账慢于钩子读会双发（'(()'）——发后等足再判，
-    # 非空不是 () 就清场重来，绝不连发。
+
+    def _stable(poll_s=1.2, rounds=2):
+        # 44212844089 实锤：偶发双插 '(()' 会在任何断言之后才落账（内核重放
+        # 迟到超出 _echo 去重窗）。每步以「读数两拍一致」为落账依据。
+        t1 = _norm_text(_hook_doc_safe().get("text", ""))
+        for _ in range(rounds):
+            time.sleep(poll_s)
+            t2 = _norm_text(_hook_doc_safe().get("text", ""))
+            if t2 == t1:
+                break
+            t1 = t2
+        return t1.strip()
+
+    # 44141628790 定谳：TryAutoPair 只挂按键链，粘贴永不触发配对——
+    # 用真实按键 Shift+Number9（US 布局 +9，pywinauto 的 ( 是分组符）。
     for i in range(5):
-        doc = _hook_doc_safe()
-        t = doc.get("text", "").strip()
+        t = _stable()
         if t == "()":
             break
-        if t:
-            # 非空但不是 ()：等一拍（迟到键/慢落账）再判
-            time.sleep(1.5)
-            t = _hook_doc_safe().get("text", "").strip()
-            if t == "()":
-                break
-            clear_editor_settled()
-            continue
         if i:
             focus_main()
         click_editor()
         send_keys("+9")
-        time.sleep(2.0)
-    doc = _hook_doc_safe()
-    assert doc.get("text", "").strip() == "()", f"X09: 配对插入不对: {doc.get('text', '')[-20:]!r}"
-    for i in range(3):
-        doc = _hook_doc_safe()
-        if doc.get("text", "").strip() == "":
+        print(f"X09: 第{i + 1}次发送 +9 后: {_stable()!r}", flush=True)
+    t = _stable()
+    assert t == "()", f"X09: 配对插入不对: {t[-20:]!r}"
+    # 撤销按状态机走：()→退一组；'(()'→先退多余插入组再续，直至退净
+    for i in range(4):
+        if t == "":
             break
-        if i:
-            focus_main()
+        focus_main()
         click_editor()
         send_keys("^z")
-        time.sleep(0.8)
-    doc = _hook_doc_safe()
-    assert doc.get("text", "").strip() == "", f"X09: 配对撤销一步未退净: {doc.get('text', '')[-20:]!r}"
+        time.sleep(1.0)
+        t = _stable()
+        print(f"X09: 撤销第{i + 1}轮后: {t!r}", flush=True)
+    assert t == "", f"X09: 配对撤销一步未退净: {t[-20:]!r}"
     shot("case-pair-undo")
+    esc_cleanup()
+
+
+FILE_RO = os.path.join(DOCS, "taopad-ro.txt")
+
+
+def _snapshot_files():
+    roots = [os.path.join(os.environ.get("LOCALAPPDATA", ""), "TaoPad", "snapshots"),
+             r"D:\TaoPadData\TaoPad\snapshots"]
+    return {os.path.join(dp, f) for r in roots if os.path.isdir(r)
+            for dp, _d, fs in os.walk(r) for f in fs}
+
+
+def c_snapshot_ui():
+    """X10：快照留底（1.1.1）——立即留底命令真实落盘（新快照含探测正文），
+    查看快照对话框可开（XAML 对话框无钩子通道，以截图为证）。"""
+    editor_open_clean()
+    menu_click_mouse("语言", "纯文本")
+    time.sleep(0.4)
+    clear_editor_settled()
+    probe = f"snapshot-probe-{int(time.time())}"
+    paste_verified(probe)
+    before = _snapshot_files()
+    if not menu_click_mouse("文件", "立即留底"):
+        menu_xy("文件", "立即留底")
+    time.sleep(1.5)
+    new = _snapshot_files() - before
+    assert new, f"立即留底未产生新快照: before={len(before)}"
+    hit = any(probe in open(p2, encoding="utf-8", errors="ignore").read() for p2 in new)
+    assert hit, f"新快照不含探测正文: {[os.path.basename(x) for x in new]!r}"
+    if not menu_click_mouse("文件", "查看快照…"):
+        menu_xy("文件", "查看快照…", keep_open=True)
+    time.sleep(1.2)
+    shot("case-snapshot")
+    send_keys("{ESC}")
+    time.sleep(0.6)
+    esc_cleanup()
+
+
+def c_bookmarks():
+    """X11：书签（1.1.1）——Ctrl+F2 打点、F2 跳转、再 Ctrl+F2 取消，
+    书签行号走钩子硬通道 bookmarkLines 断言。"""
+    editor_open_clean()
+    clear_editor_settled()
+    paste_verified("line-one\nline-two\nline-three\nline-four\n")
+    time.sleep(0.8)
+    send_keys("^{F2}")          # 当前行（第 4 行）打点
+    time.sleep(1.2)
+    doc = _hook_doc_safe()
+    marks = doc.get("bookmarkLines") or []
+    assert len(marks) == 1, f"书签未打上: {marks!r}"
+    mark_line = marks[0]
+    send_keys("{F2}")           # 跳下一书签（应仍停在该行）
+    time.sleep(1.2)
+    doc = _hook_doc_safe()
+    assert doc.get("statusText", "").startswith(f"行 {mark_line}，"), (
+        f"F2 未跳到书签行 {mark_line}: {doc.get('statusText', '')!r}")
+    send_keys("^{F2}")          # 取消书签
+    time.sleep(1.2)
+    doc = _hook_doc_safe()
+    assert (doc.get("bookmarkLines") or []) == [], f"书签未取消: {doc.get('bookmarkLines')!r}"
+    esc_cleanup()
+
+
+def c_param_hint():
+    """X12：参数提示浮层（1.1.1）——C# 键入 Math.Abs( 出签名提示，
+    浮层状态走钩子硬通道 hintDebug 断言。"""
+    editor_open_clean()
+    menu_click_mouse("语言", "C#")
+    time.sleep(0.6)
+    clear_editor_settled()
+    paste_verified("int probe = 1;")
+    time.sleep(0.8)
+    send_keys("{END}{ENTER}")
+    time.sleep(0.6)
+    send_keys("Math.Abs")
+    send_keys("{ESC}")          # 收掉补全弹层，给参数提示让路（两浮层互斥）
+    time.sleep(0.4)
+    send_keys("+9")             # 真实按键敲 (，触发提示（粘贴不触发）
+    doc = {}
+    ok = False
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        doc = _hook_doc_safe()
+        if "open=True" in (doc.get("hintDebug") or ""):
+            ok = True
+            break
+        time.sleep(1.5)
+    assert ok, f"参数提示未弹出: {doc.get('hintDebug', '')!r}"
+    assert "Math.Abs" in (doc.get("hintDebug") or ""), f"提示非 Math.Abs 签名: {doc.get('hintDebug')!r}"
+    shot("case-param-hint")
+    esc_cleanup()
+
+
+def c_readonly():
+    """X13：只读文件（1.1.1）——只读档案打开后 readOnly 置位、状态行标注、
+    键入被挡，钩子通道为证。"""
+    with open(FILE_RO, "w", encoding="utf-8") as f:
+        f.write("readonly-probe")
+    os.system(f'attrib +R "{FILE_RO}"')
+    esc_cleanup()
+    focus_main()
+    send_keys("^o")
+    time.sleep(0.6)
+    picker_typing(FILE_RO)
+    time.sleep(1.5)
+    doc = _hook_doc_safe()
+    assert doc.get("readOnly") is True, f"只读未置位: {doc.get('readOnly')!r}"
+    assert "（只读）" in doc.get("statusText", ""), f"状态行未标注只读: {doc.get('statusText', '')!r}"
+    click_editor()
+    send_keys("abc")
+    time.sleep(1.0)
+    doc = _hook_doc_safe()
+    assert "abc" not in doc.get("text", ""), "只读文件仍可键入"
+    os.system(f'attrib -R "{FILE_RO}"')
     esc_cleanup()
 
 
@@ -3187,6 +3315,10 @@ def main():
         ("X07 C# 语义补全弹层", c_csharp_completion),
         ("X08 C# 撤销一步到位", c_csharp_undo),
         ("X09 配对/注释单步撤销", c_pair_comment_undo),
+        ("X10 快照留底", c_snapshot_ui),
+        ("X11 书签", c_bookmarks),
+        ("X12 参数提示", c_param_hint),
+        ("X13 只读文件", c_readonly),
         ("O09 正常退出+崩溃检查", c_exit),
     ]
     part = (sys.argv[1] if len(sys.argv) > 1 else "").upper()

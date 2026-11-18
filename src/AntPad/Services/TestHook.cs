@@ -36,6 +36,10 @@ public static class TestHook
         [JsonPropertyName("bracketColors")] public List<string> BracketColors { get; set; } = new();
         // 补全弹层硬通道（1.1.0）：弹层开着时导出候选词，X07 据此断言 C# 语义补全
         [JsonPropertyName("completionItems")] public List<string> CompletionItems { get; set; } = new();
+        // 参数提示硬通道（1.1.1）：浮层开关 + 最近一次签名函数名（X12 用例）
+        [JsonPropertyName("hintDebug")] public string HintDebug { get; set; } = "";
+        // 书签硬通道（1.1.1）：当前书签行号（1 计，升序），X11 据此断言打点/取消
+        [JsonPropertyName("bookmarkLines")] public List<int> BookmarkLines { get; set; } = new();
     }
 
     public sealed class Snapshot
