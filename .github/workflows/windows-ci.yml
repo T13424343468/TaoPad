@@ -128,7 +128,25 @@ jobs:
           Snap "evidence\user-launch-2.png"
           Get-Process TaoPad -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 2
-          Write-Host "真实用户视角：静默安装、启动、稳定运行均通过"
+
+          Write-Host "关联通道实测：ShellExecute 走系统注册表（= 双击/打开方式同链路）"
+          $assocTxt = Join-Path $env:USERPROFILE "Documents\taopad-assoc.txt"
+          Set-Content -Path $assocTxt -Value "assoc-probe-734912" -Encoding UTF8
+          Start-Process $assocTxt
+          Start-Sleep -Seconds 12
+          if (-not (Get-Process TaoPad -ErrorAction SilentlyContinue)) { throw "txt 关联启动后 TaoPad 进程不在（关联链路断/被别的程序接走）" }
+          Snap "evidence\assoc-launch.png"
+          Get-Process TaoPad -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 2
+
+          Write-Host "摘除验证：.html 不再关联 TaoPad（老板拍板 2026-11-18）"
+          $assocHtml = Join-Path $env:USERPROFILE "Documents\taopad-assoc.html"
+          Set-Content -Path $assocHtml -Value "<html><body>assoc-html-probe-918273</body></html>" -Encoding UTF8
+          Start-Process $assocHtml -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 10
+          if (Get-Process TaoPad -ErrorAction SilentlyContinue) { throw "html 仍被 TaoPad 接走（摘除未生效）" }
+          Snap "evidence\assoc-html-not-launched.png"
+          Write-Host "真实用户视角：静默安装、启动、稳定运行、关联启动、html 摘除均通过"
 
       - name: 上传本班证据
         if: always()
