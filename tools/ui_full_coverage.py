@@ -3913,7 +3913,19 @@ def main():
     part = (sys.argv[1] if len(sys.argv) > 1 else "").upper()
     if part in ("A", "B"):
         sel = ALL_CASES[:14] if part == "A" else ALL_CASES[14:]
-        print(f"半场 {part}：{len(sel)} 用例", flush=True)
+        # v46o：定向回归开关（修红不打断全测定版令）。半场后跟逗号分隔的
+        # 科目编号或关键词（如 `B X07,X15,X21`），只跑命中科目——修红先
+        # 点科、绿了再整场定版，不再整轮重跑全测
+        only = (sys.argv[2] if len(sys.argv) > 2 else "").strip()
+        if only:
+            keys = [k.strip().upper() for k in only.split(",") if k.strip()]
+            def _hit(n: str) -> bool:
+                head = n.split()[0].upper()
+                return any(k == head or k in n.upper() for k in keys)
+            sel = [(n, f) for (n, f) in sel if _hit(n)]
+            if not sel:
+                print(f"定向开关未命中任何科目: {only!r}", flush=True)
+        print(f"半场 {part}：{len(sel)} 用例{('，定向=' + only) if only else ''}", flush=True)
     else:
         sel = ALL_CASES
     try:
