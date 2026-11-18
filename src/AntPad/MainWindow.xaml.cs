@@ -135,6 +135,11 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             case "paste_clipboard":
                 Ed?.Paste();
                 return "ok:paste";
+            case "type":
+                if (Active is not { } docTyped) return "ERR no-doc";
+                docTyped.Editor.TypeAtEnd(arg ?? "");
+                UpdateStatus();
+                return "ok:typed";
             default:
                 return "ERR unknown-command:" + command;
         }

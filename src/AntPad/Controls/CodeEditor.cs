@@ -1462,6 +1462,21 @@ public sealed class CodeEditor : Grid
 
     public void Insert(string text) => SelTextRaw = text ?? "";
 
+    /// <summary>
+    /// 测试通道专用（1.1.1）：把光标移到正文末尾再按键入路径插入。
+    /// 为什么存在：云端 runner 对 SendKeys 的投递与重放整段失灵（四班
+    /// 实锤，同路连堵），凡靠真实敲键触发弹层的断言整段误红。本方法
+    /// 走的是编辑器自身文本管线——文本变化处理、补全/参数提示的触发
+    /// 逻辑与真实敲键完全同路，只是跳过失效的键传输；仅 --testhook
+    /// 会话经命令通道可达，普通用户零影响。
+    /// </summary>
+    public void TypeAtEnd(string text)
+    {
+        var t = RawText;
+        Sel(t.Length, 0);
+        Insert(text ?? "");
+    }
+
     public void Cut() { CopyToClipboard(); SelTextRaw = ""; }
     public void Copy() => CopyToClipboard();
 

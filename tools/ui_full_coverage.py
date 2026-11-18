@@ -1672,6 +1672,18 @@ def c_csharp_completion():
                 if t.endswith("list."):
                     typed = True
                     break
+        if not typed:
+            # 命令硬通道兜底（v46）：SendKeys 投递与重放整段失灵已四班
+            # 实锤——模拟键入走编辑器自身文本管线，补全触发与真实敲键同路
+            r = hook_command("type", "list.")
+            print(f"X07: 模拟键入回执: {r.get('commandResult')!r}", flush=True)
+            deadline = time.time() + 6
+            while time.time() < deadline:
+                t = _hook_doc_safe().get("text") or ""
+                if t.endswith("list."):
+                    typed = True
+                    break
+                time.sleep(1.0)
         if typed:
             break
         print(f"X07: 第{attempt + 1}轮键入未落账/正文尾脏: {doc.get('text', '')[-30:]!r}", flush=True)
@@ -1919,6 +1931,17 @@ def c_param_hint():
             ok = True
             break
         time.sleep(1.5)
+    if not ok:
+        # 命令硬通道兜底（v46）：模拟键入走编辑器自身文本管线——
+        # 「( 触发参数提示」的处理与真实敲键完全同路，跳过失效的键传输
+        r = hook_command("type", "Math.Abs(")
+        print(f"X12: 模拟键入回执: {r.get('commandResult')!r}", flush=True)
+        for _t2 in range(6):
+            doc = _hook_doc_safe()
+            if "open=True" in (doc.get("hintDebug") or ""):
+                ok = True
+                break
+            time.sleep(1.0)
     if not ok:
         # 44243562687 实锤：补全弹层没被收掉时 ( 的参数提示被互斥压住。
         # 产品已改「敲 ( 即收补全、提示接棒」；此处再补真实重敲兜底：
