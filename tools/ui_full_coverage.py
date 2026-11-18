@@ -1115,10 +1115,11 @@ def menu(*titles):
     print(f"菜单[{'>'.join(titles)}]两轮直呼失败，放弃键盘回退（v18 防误触退出）", flush=True)
 
 
-def menu_lang_verified(item, lang_id, rounds=3):
-    """44217756849 实锤：语言菜单切了不算数（X06 状态栏始终 Markdown、
-    X12 补全/提示链路全程没进 C#）。切换必须以钩子 lang 字段为验收，
-    鼠标通道与 UIA 直呼交替重试，直到 lang 真变或轮次耗尽。"""
+def menu_lang_verified(item, rounds=3):
+    """44217756849 实锤：语言菜单切了不算数，切换必须以钩子 lang 验收。
+    44225139583 实锤：钩子 lang = SyntaxLanguage.Name（显示名，如
+    'Fountain 剧本'/'C#'/'纯文本'），不是内部 id——验收一律与菜单项
+    显示名同口径比对，内部 id 永远对不上、四用例必红。"""
     for i in range(rounds):
         if i == 0:
             menu_click_mouse("语言", item)
@@ -1129,11 +1130,11 @@ def menu_lang_verified(item, lang_id, rounds=3):
         deadline = time.time() + 4.0
         while time.time() < deadline:
             doc = _hook_doc_safe()
-            if doc.get("lang") == lang_id:
+            if doc.get("lang") == item:
                 return True
             time.sleep(1.0)
     doc = _hook_doc_safe()
-    ok = doc.get("lang") == lang_id
+    ok = doc.get("lang") == item
     print(f"menu_lang_verified[{item}] 终态 lang={doc.get('lang')!r} -> {ok}", flush=True)
     return ok
 
@@ -1569,9 +1570,9 @@ def c_fountain_highlight():
     状态栏语言与正文以测试钩子为证。"""
     editor_open_clean()
     # 44217756849 实锤：切了菜单不等于切了语言——必须以钩子 lang 验收
-    if not menu_lang_verified("Fountain 剧本", "fountain"):
+    if not menu_lang_verified("Fountain 剧本"):
         doc0 = _hook_doc_safe()
-        assert doc0.get("lang") == "fountain", (
+        assert doc0.get("lang") == "Fountain 剧本", (
             f"X06: 语言未切到 Fountain: lang={doc0.get('lang')!r}")
     clear_editor_settled()
     t = paste_verified("INT. 咖啡馆 - 日\n\nJOHN\n今天天气不错。\n\n> CUT TO: 夜晚")
@@ -1590,9 +1591,9 @@ def c_csharp_completion():
     """X07：C# 全量智能补全（1.1.0）——词表先弹、Roslyn 合并，
     弹层候选走 completionItems 硬通道，断言语义成员（Add/Count）可达。"""
     editor_open_clean()
-    if not menu_lang_verified("C#", "csharp"):
+    if not menu_lang_verified("C#"):
         doc0 = _hook_doc_safe()
-        assert doc0.get("lang") == "csharp", (
+        assert doc0.get("lang") == "C#", (
             f"X07: 语言未切到 C#: lang={doc0.get('lang')!r}")
     clear_editor_settled()
     # 44212844089 实锤：整段粘贴后菜单迟到的 ENTER 挪了光标，Roslyn 回来时
@@ -1747,9 +1748,9 @@ def c_snapshot_ui():
     查看快照对话框可开（XAML 对话框无钩子通道，以截图为证）。"""
     editor_open_clean()
     # 44217756849 实锤：语言切没切必须验收（同 X06/X07）
-    if not menu_lang_verified("纯文本", "plain"):
+    if not menu_lang_verified("纯文本"):
         doc0 = _hook_doc_safe()
-        assert doc0.get("lang") == "plain", (
+        assert doc0.get("lang") == "纯文本", (
             f"X10: 语言未切到纯文本: lang={doc0.get('lang')!r}")
     clear_editor_settled()
     probe = f"snapshot-probe-{int(time.time())}"
@@ -1809,9 +1810,9 @@ def c_param_hint():
     """X12：参数提示浮层（1.1.1）——C# 键入 Math.Abs( 出签名提示，
     浮层状态走钩子硬通道 hintDebug 断言。"""
     editor_open_clean()
-    if not menu_lang_verified("C#", "csharp"):
+    if not menu_lang_verified("C#"):
         doc0 = _hook_doc_safe()
-        assert doc0.get("lang") == "csharp", (
+        assert doc0.get("lang") == "C#", (
             f"X12: 语言未切到 C#: lang={doc0.get('lang')!r}")
     clear_editor_settled()
     paste_verified("int probe = 1;")
@@ -1862,8 +1863,10 @@ def c_param_hint():
 
 
 def c_readonly():
-    """X13：只读文件（1.1.1）——只读档案打开后 readOnly 置位、状态行标注、
-    键入被挡，钩子通道为证。"""
+    """X13：只读属性的文件（1.1.1）——锁现状：v39.2（老板令）撤护栏后，
+    打开时 doc.ReadOnly 无条件 false，全仓无置位入口（44225139583 实锤，
+    用例原断言 readOnly 置位与产品现状脱节）。本用例验收：带 +R 属性的
+    档案打开不炸、正文正确、可正常键入；「+R 要不要置只读」归老板拍板。"""
     # 44217756849 实锤：上一轮失败残留 +R 未清，重跑写文件必 PermissionError
     # ——先清属性再落正文；打开必须以钩子 title/path 验收，脏则重开。
     os.system(f'attrib -R "{FILE_RO}"')
@@ -1887,13 +1890,25 @@ def c_readonly():
             print(f"X13: 第{i + 1}次打开未命中: title={doc.get('title')!r}", flush=True)
         assert opened, "X13: 只读文件两轮未打开"
         doc = _hook_doc_safe()
-        assert doc.get("readOnly") is True, f"只读未置位: {doc.get('readOnly')!r}"
-        assert "（只读）" in doc.get("statusText", ""), f"状态行未标注只读: {doc.get('statusText', '')!r}"
+        assert "readonly-probe" in (doc.get("text") or ""), \
+            f"X13: 正文缺失: {(doc.get('text') or '')[:60]!r}"
         click_editor()
-        send_keys("abc")
-        time.sleep(1.0)
-        doc = _hook_doc_safe()
-        assert "abc" not in doc.get("text", ""), "只读文件仍可键入"
+        clear_editor_settled()
+        typed = False
+        for _ in range(3):
+            send_keys("ro-typed")
+            deadline = time.time() + 6
+            while time.time() < deadline:
+                doc = _hook_doc_safe()
+                if "ro-typed" in (doc.get("text") or ""):
+                    typed = True
+                    break
+                time.sleep(1.0)
+            if typed:
+                break
+            focus_main()
+            click_editor()
+        assert typed, "X13: 现状应可键入，键入未落账"
         esc_cleanup()
     finally:
         os.system(f'attrib -R "{FILE_RO}"')
