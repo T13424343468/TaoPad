@@ -1694,17 +1694,25 @@ def c_csharp_completion():
     assert typed, f"X07: 键入未落账: {(doc or {}).get('text', '')[-40:]!r}"
     # 44257837793 实锤：幽灵键流持续污染尾随换行，分步「清尾→读候选」永远
     # 赶不上污染速度——改走原子命令 trim_and_items（UI 线程内清尾+触发+读
-    # 候选一次成型），只要空出一拍就能拿全候选
+    # 候选一次成型），只要空出一拍就能拿全候选。
+    # v46k（44310940578 X07 实锤）：csharp 词表空时弹层两段式——list. 后
+    # MaybeShowPopup 走 Roslyn 异步合并，回调后才 ShowPopup；测试同步瞬读
+    # 永远早于回执。改为 trim_and_items 打一次底触发，再轮询 popup_items
+    # 直到 Roslyn 回执落地（60s 时限）。
     res = ""
     ok = False
+    r = hook_command("trim_and_items")
+    res = r.get("commandResult") or ""
+    if res.startswith("ok:items=[") and "Add" in res and "Count" in res:
+        ok = True
     deadline = time.time() + 60
-    while time.time() < deadline:
-        r = hook_command("trim_and_items")
+    while not ok and time.time() < deadline:
+        r = hook_command("popup_items")
         res = r.get("commandResult") or ""
         if res.startswith("ok:items=[") and "Add" in res and "Count" in res:
             ok = True
             break
-        time.sleep(1.0)
+        time.sleep(2.0)
     if not ok:
         doc = _try_hook_dump(timeout=25.0) or {}
     assert ok, (f"X07: 补全弹层候选缺语义成员: {res[:160]!r}"
@@ -3594,19 +3602,25 @@ def c_external_change():
         f.write("watch-probe-v2-external\n")
     ok = False
     ev = []
-    deadline = time.time() + 30
+    esc_sent = 0
+    # v46k（44310940578 X17 实锤）：watcher 双发——首事件弹窗未显示、
+    # ShowDialogSafe 瞬回 null（choice= 空），匹配裸「对话框已确认」会
+    # 抢跑、ESC 发早被吞，真弹窗反被后续事件时序卡住。改为只认
+    # choice=None（最多 45s），期间见「检测到」按秒补发 ESC（≤3 次）
+    deadline = time.time() + 45
     while time.time() < deadline:
         ev = trace_since(mark)
-        if any("外部修改：对话框已确认" in l for l in ev):
+        if any("外部修改：对话框已确认 choice=None" in l for l in ev):
             ok = True
             break
+        if any("检测到" in l for l in ev) and esc_sent < 3:
+            send_keys("{ESC}")
+            esc_sent += 1
         time.sleep(1.0)
     if not ok:
         r = hook_command("hint_probe")   # 探针留证：区分没检测到与界面冻住
         print(f"X17: 提示探针: {r.get('commandResult')!r}", flush=True)
-    assert ok, f"X17: 干净档案外部修改未弹对话框: {' | '.join(ev)[-160:]!r}"
-    send_keys("{ESC}")
-    time.sleep(1.0)
+    assert ok, f"X17: 干净档案外部修改未确认暂不: {' | '.join(ev)[-160:]!r}"
     doc = _hook_doc_safe()
     assert "watch-probe-v1" in (doc.get("text") or ""), "X17: 暂不后正文被改"
     # 未保存改动：外部改 → 仅提醒，不弹框

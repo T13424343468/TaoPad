@@ -153,6 +153,13 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             case "hint_probe":
                 if (Active is not { } docProbe) return "ERR no-doc";
                 return docProbe.Editor.HintProbe();
+            case "popup_items":
+                // v46k：候选轮询通道。csharp 词表空时弹层走 Roslyn 异步合并
+                //（CodeEditor.MaybeShowPopup → EnrichWithRoslynAsync），回调
+                // 后才 ShowPopup；测试同步瞬读永远早于回执（44310940578
+                // X07 实锤 items=[]）。让测试反复读直到 Roslyn 回执落地
+                if (Active is not { } docPI) return "ERR no-doc";
+                return "ok:items=[" + string.Join(",", docPI.Editor.PopupItems) + "]";
             default:
                 return "ERR unknown-command:" + command;
         }
