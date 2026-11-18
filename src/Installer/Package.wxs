@@ -82,8 +82,8 @@
         </Control>
         <Control Id="AssocCheck" Type="CheckBox" X="20" Y="258" Width="320" Height="16"
                  Property="ASSOC_ALL" CheckBoxValue="1" Text="关联常见文档类型（txt / md / json 等）">
-          <Publish Event="Remove" Value="AssocTxt;AssocMd;AssocJson;AssocXml;AssocHtml;AssocCs;AssocCpp;AssocPy;AssocSql" Condition="NOT ASSOC_ALL" />
-          <Publish Event="AddLocal" Value="AssocTxt;AssocMd;AssocJson;AssocXml;AssocHtml;AssocCs;AssocCpp;AssocPy;AssocSql" Condition="ASSOC_ALL" />
+          <Publish Event="Remove" Value="AssocTxt;AssocMd;AssocJson;AssocXml;AssocCs;AssocCpp;AssocPy;AssocSql" Condition="NOT ASSOC_ALL" />
+          <Publish Event="AddLocal" Value="AssocTxt;AssocMd;AssocJson;AssocXml;AssocCs;AssocCpp;AssocPy;AssocSql" Condition="ASSOC_ALL" />
         </Control>
 
         <Control Id="InstallNow" Type="PushButton" X="340" Y="240" Width="80" Height="24"
@@ -212,10 +212,8 @@
           <RegistryValue Root="HKCR" Key=".xml" Value="TaoPad.TextFile" Type="string" KeyPath="yes" />
           <RegistryValue Root="HKCR" Key=".xml\OpenWithProgids" Name="TaoPad.TextFile" Value="" Type="string" />
         </Component>
-        <Component Id="AssocHtml" Guid="1A2B3C4D-5E6F-4A01-8B02-C3D4E5F60105">
-          <RegistryValue Root="HKCR" Key=".html" Value="TaoPad.TextFile" Type="string" KeyPath="yes" />
-          <RegistryValue Root="HKCR" Key=".html\OpenWithProgids" Name="TaoPad.TextFile" Value="" Type="string" />
-        </Component>
+        <!-- .html/.htm 不再关联（老板拍板 2026-11-18）：网页文件归浏览器，
+             文本编辑器默认接管网页文件只会添乱；确有需要走「打开方式」。 -->
         <Component Id="AssocCs" Guid="1A2B3C4D-5E6F-4A01-8B02-C3D4E5F60106">
           <RegistryValue Root="HKCR" Key=".cs" Value="TaoPad.TextFile" Type="string" KeyPath="yes" />
           <RegistryValue Root="HKCR" Key=".cs\OpenWithProgids" Name="TaoPad.TextFile" Value="" Type="string" />
@@ -274,9 +272,6 @@
     </Feature>
     <Feature Id="AssocXml" Title="关联 .xml" Level="1">
       <ComponentRef Id="AssocXml" />
-    </Feature>
-    <Feature Id="AssocHtml" Title="关联 .html" Level="1">
-      <ComponentRef Id="AssocHtml" />
     </Feature>
     <Feature Id="AssocCs" Title="关联 .cs 源码" Level="1">
       <ComponentRef Id="AssocCs" />

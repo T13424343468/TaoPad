@@ -926,7 +926,9 @@ DEAD_MARKED = False
 def case(name, fn):
     global DEAD_MARKED
     mem_probe(name)
-    if not app_alive():
+    # v46c：X14 冷启动用例自带拉起进程，不受存活守卫约束
+    self_launch = getattr(fn, "self_launch", False)
+    if not self_launch and not app_alive():
         if not DEAD_MARKED:
             DEAD_MARKED = True
             collect_crash_scene()
@@ -1653,19 +1655,29 @@ def c_csharp_completion():
     typed = False
     doc = {}
     trims = 0
-    deadline = time.time() + 30
+    deadline = time.time() + 60
+    last = None
+    stable = 0
     while time.time() < deadline:
         doc = _hook_doc_safe()
         t = doc.get("text") or ""
         if t.endswith("list."):
             typed = True
             break
-        # 迟到的键重放塞了尾随换行（多班实锤）：命令硬通道剥掉，文本变化
-        # 让补全按 list. 语境重开；真实退格清尾会被下一波重放再次污染，
-        # 唯有命令硬通道删除是确定性的
-        if t.rstrip("\r\n \t").endswith("list.") and trims < 8:
-            hook_command("trim_tail")
-            trims += 1
+        # 迟到的键重放塞了尾随换行（多班实锤）：真实退格清尾会被下一波
+        # 重放再次污染，唯一稳的打法=等正文稳定（幽灵队列排空）再由命令
+        # 硬通道剥尾——文本变化让补全按 list. 语境重开
+        if t.rstrip("\r\n \t").endswith("list.") and trims < 12:
+            if t == last:
+                stable += 1
+            else:
+                stable = 0
+                last = t
+            if stable >= 5:
+                hook_command("trim_tail")
+                trims += 1
+                stable = 0
+                last = None
         time.sleep(1.0)
     assert typed, f"X07: 键入未落账: {(doc or {}).get('text', '')[-40:]!r}"
     doc = {}
@@ -3440,6 +3452,9 @@ def c_html_cold_start():
     # 收尾：冷启动实例优雅关闭（文档未改动，不会弹保存确认），不留残留进程
     subprocess.run(["taskkill", "/IM", "TaoPad.exe"], capture_output=True, timeout=30)
     time.sleep(2.0)
+
+
+c_html_cold_start.self_launch = True   # 自带拉起进程，绕过 case() 的存活守卫
 
 
 def main():
