@@ -390,7 +390,10 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             doc.Enc = enc;
             doc.Bom = bom;
             doc.Editor.Text = text;
-            doc.Editor.SyntaxLanguage = LangDef.FromFileName(path);
+            // v46j（老板令「快点落地能用」2026-11-18）：超大档案不做全量着色——
+            // X15 四班实锤：30MB 着色档案的着色批次把界面线程拖到分钟级，快照
+            // 回不来=界面冻死。阈值以上按纯文本开，先回来能用；着色只服务小档案。
+            doc.Editor.SyntaxLanguage = text.Length > 2_000_000 ? null : LangDef.FromFileName(path);
             doc.Eol = DetectEol(text);
             // v39.2（老板令）：撤 2MB 只读护栏——大文件可编辑可保存；
             // 50MB 打开硬上限保留（渲染内存安全线）。
@@ -769,8 +772,14 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             doc.Editor.IsReadOnly = doc.ReadOnly;
             // 按新扩展名自动切换着色语言：另存为 .sql 后立即按 SQL 着色，
             // 不再沿用打开时的旧语言（修 test.sql 显示 C# 一类问题）
+            // v46j 同源护栏：超大档案保存后不重做着色批次（会把界面拖死），
+            // 与打开侧阈值一致。
             var langByExt = AntPad.Syntax.LangDef.FromFileName(path);
-            if (!ReferenceEquals(doc.Editor.SyntaxLanguage, langByExt))
+            if (doc.Editor.Text.Length > 2_000_000)
+            {
+                doc.Editor.SyntaxLanguage = null;
+            }
+            else if (!ReferenceEquals(doc.Editor.SyntaxLanguage, langByExt))
             {
                 doc.Editor.SyntaxLanguage = langByExt;
                 UpdateLangChecks();

@@ -1670,7 +1670,10 @@ def c_csharp_completion():
     while time.time() < deadline:
         doc = _hook_doc_safe()
         t = doc.get("text") or ""
-        if t.endswith("list."):
+        # 44306971603 起按定谳放宽：正文已落 list. 即算键入成功——
+        # 尾随 CRLF 是幽灵键流（环境噪声，多班实锤），trim_and_items
+        # 在 UI 线程内原子剥尾后读候选，此处不再死等剥干净。
+        if t.rstrip("\r\n \t").endswith("list."):
             typed = True
             break
         # 迟到的键重放塞了尾随换行（多班实锤）：真实退格清尾会被下一波
