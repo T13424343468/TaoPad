@@ -1632,69 +1632,42 @@ def c_fountain_highlight():
 
 def c_csharp_completion():
     """X07：C# 全量智能补全（1.1.0）——词表先弹、Roslyn 合并，
-    弹层候选走 completionItems 硬通道，断言语义成员（Add/Count）可达。"""
+    弹层候选走 completionItems 硬通道，断言语义成员（Add/Count）可达。
+    v46c 换路（防耗死令：键重放污染同路四班实锤，44250541252 尾账
+    'list.\\r\\n'）：键入改走命令硬通道 type/trim_tail——编辑器同一文本
+    管线（TextChanged→MaybeShowPopup），仅跳过失效的键传输；v46b 起
+    TypeAtEnd 插入后光标显式归位并按最终光标补跑弹层触发。"""
     editor_open_clean()
     if not menu_lang_verified("C#"):
+        r = hook_command("set_language", "C#")
         doc0 = _hook_doc_safe()
         assert doc0.get("lang") == "C#", (
-            f"X07: 语言未切到 C#: lang={doc0.get('lang')!r}")
+            f"X07: 语言未切到 C#: lang={doc0.get('lang')!r} 回执={r.get('commandResult')!r}")
     clear_editor_settled()
-    # 44212844089 实锤：整段粘贴后菜单迟到的 ENTER 挪了光标，Roslyn 回来时
-    # sameCaret 不成立，续弹被静默丢弃。改为声明行粘贴落稳后 list. 用真实
-    # 按键逐字敲——成员补全由键入路径触发，此后再无迟到键可挪光标。
-    # 44217756849 再补一刀：迟到的重放 ENTER 会在 list. 之后多落 \r\n，
-    # 正文尾不再是 list.（弹层被收）——键入必须以钩子正文尾验收，脏则重试。
     paste_verified("var list = new List<string>();")
-    time.sleep(1.0)
-    send_keys("{END}{ENTER}")
     time.sleep(0.8)
+    r = hook_command("type", "\n")
+    print(f"X07: 换行回执: {r.get('commandResult')!r}", flush=True)
+    r = hook_command("type", "list.")
+    print(f"X07: 键入回执: {r.get('commandResult')!r}", flush=True)
     typed = False
-    for attempt in range(3):
-        send_keys("list.")
-        deadline = time.time() + 8
+    doc = {}
+    trims = 0
+    deadline = time.time() + 30
+    while time.time() < deadline:
         doc = _hook_doc_safe()
-        while time.time() < deadline:
-            doc = _hook_doc_safe()
-            if (doc.get("text") or "").endswith("list."):
-                typed = True
-                break
-            time.sleep(1.0)
-        if not typed:
-            # 44243562687 实锤：迟到重放的 ENTER 在 list. 后塞 \r\n 收掉弹层。
-            # 以退格真键清掉尾随空白——文本变化会让补全弹层按 list. 语境重开
-            for _bk in range(4):
-                t = _hook_doc_safe().get("text") or ""
-                if not (t.endswith("list.") or t.rstrip("\r\n").endswith("list.")):
-                    break   # 尾不是 list. 族，退格只会更糟，交回重试主路
-                send_keys("{BACKSPACE}")
-                time.sleep(0.8)
-                t = _hook_doc_safe().get("text") or ""
-                if t.endswith("list."):
-                    typed = True
-                    break
-        if not typed:
-            # 命令硬通道兜底（v46）：SendKeys 投递与重放整段失灵已四班
-            # 实锤——模拟键入走编辑器自身文本管线，补全触发与真实敲键同路
-            r = hook_command("type", "list.")
-            print(f"X07: 模拟键入回执: {r.get('commandResult')!r}", flush=True)
-            deadline = time.time() + 6
-            while time.time() < deadline:
-                t = _hook_doc_safe().get("text") or ""
-                if t.endswith("list."):
-                    typed = True
-                    break
-                time.sleep(1.0)
-        if typed:
+        t = doc.get("text") or ""
+        if t.endswith("list."):
+            typed = True
             break
-        print(f"X07: 第{attempt + 1}轮键入未落账/正文尾脏: {doc.get('text', '')[-30:]!r}", flush=True)
-        focus_main()
-        click_editor()
-        clear_editor_settled()
-        paste_verified("var list = new List<string>();")
-        time.sleep(0.8)
-        send_keys("{END}{ENTER}")
-        time.sleep(0.6)
-    assert typed, f"X07: 键入三轮未落账: {(doc or {}).get('text', '')[-30:]!r}"
+        # 迟到的键重放塞了尾随换行（多班实锤）：命令硬通道剥掉，文本变化
+        # 让补全按 list. 语境重开；真实退格清尾会被下一波重放再次污染，
+        # 唯有命令硬通道删除是确定性的
+        if t.rstrip("\r\n \t").endswith("list.") and trims < 8:
+            hook_command("trim_tail")
+            trims += 1
+        time.sleep(1.0)
+    assert typed, f"X07: 键入未落账: {(doc or {}).get('text', '')[-40:]!r}"
     doc = {}
     items = []
     deadline = time.time() + 30
@@ -1703,6 +1676,10 @@ def c_csharp_completion():
         items = doc.get("completionItems") or []
         if "Add" in items and "Count" in items:
             break
+        t = doc.get("text") or ""
+        if not t.endswith("list.") and t.rstrip("\r\n \t").endswith("list.") and trims < 8:
+            hook_command("trim_tail")   # 重放又塞了尾：剥掉让弹层重开
+            trims += 1
         time.sleep(2.0)
     assert "Add" in items and "Count" in items, (
         f"X07: 补全弹层候选缺语义成员: {items[:12]!r} 诊断={doc.get('completionDebug','')!r}"
@@ -1883,80 +1860,52 @@ def c_bookmarks():
 
 def c_param_hint():
     """X12：参数提示浮层（1.1.1）——C# 键入 Math.Abs( 出签名提示，
-    浮层状态走钩子硬通道 hintDebug 断言。"""
+    浮层状态走钩子硬通道 hintDebug 断言。
+    v46c 换路（防耗死令：键重放污染同路四班实锤）：键入全部走命令硬
+    通道 type——编辑器同一文本管线，弹层触发与真实敲键同路；v46b 起
+    TypeAtEnd 插入后光标显式归位并按最终光标补跑提示触发。失败时用
+    hint_probe 探针留诊断（区分「触发失败」与「弹了又被收」）。"""
     editor_open_clean()
     if not menu_lang_verified("C#"):
+        r = hook_command("set_language", "C#")
         doc0 = _hook_doc_safe()
         assert doc0.get("lang") == "C#", (
-            f"X12: 语言未切到 C#: lang={doc0.get('lang')!r}")
+            f"X12: 语言未切到 C#: lang={doc0.get('lang')!r} 回执={r.get('commandResult')!r}")
     clear_editor_settled()
     paste_verified("int probe = 1;")
     time.sleep(0.8)
-    send_keys("{END}{ENTER}")
-    time.sleep(0.6)
-    # 44217756849 实锤：吞键后 hintDebug 全程 open=False——键入必须以钩子
-    # 正文为验收：先见 Math.Abs、再见 Math.Abs( 才准等提示；脏则重敲。
+    r = hook_command("type", "\nMath.Abs(")
+    print(f"X12: 键入回执: {r.get('commandResult')!r}", flush=True)
     typed = False
-    for attempt in range(3):
-        send_keys("Math.Abs")
-        deadline = time.time() + 8
+    doc = {}
+    deadline = time.time() + 15
+    while time.time() < deadline:
         doc = _hook_doc_safe()
-        while time.time() < deadline:
-            doc = _hook_doc_safe()
-            if "Math.Abs" in (doc.get("text") or ""):
-                break
-            time.sleep(1.0)
-        send_keys("{ESC}")      # 收掉补全弹层，给参数提示让路（两浮层互斥）
-        time.sleep(0.4)
-        send_keys("+9")         # 真实按键敲 (，触发提示（粘贴不触发）
-        deadline = time.time() + 8
-        while time.time() < deadline:
-            doc = _hook_doc_safe()
-            if "Math.Abs(" in (doc.get("text") or ""):
-                typed = True
-                break
-            time.sleep(1.0)
-        if typed:
+        if "Math.Abs(" in (doc.get("text") or ""):
+            typed = True
             break
-        print(f"X12: 第{attempt + 1}轮键入未落账: {(doc or {}).get('text', '')[-30:]!r}", flush=True)
-        focus_main()
-        click_editor()
-    assert typed, f"X12: '(' 三轮未落账: {(doc or {}).get('text', '')[-30:]!r}"
+        time.sleep(1.0)
+    assert typed, f"X12: 键入未落账: {(doc or {}).get('text', '')[-40:]!r}"
     doc = {}
     ok = False
+    trims = 0
     deadline = time.time() + 15
     while time.time() < deadline:
         doc = _hook_doc_safe()
         if "open=True" in (doc.get("hintDebug") or ""):
             ok = True
             break
+        t = doc.get("text") or ""
+        # 迟到的键重放塞尾会收掉提示：命令硬通道剥掉，文本变化让提示
+        # 按 ( 语境重开（TypeAtEnd/TrimTailWhitespace 显式补跑触发）
+        if t.rstrip("\r\n \t").endswith("Math.Abs(") and trims < 8:
+            hook_command("trim_tail")
+            trims += 1
         time.sleep(1.5)
     if not ok:
-        # 命令硬通道兜底（v46）：模拟键入走编辑器自身文本管线——
-        # 「( 触发参数提示」的处理与真实敲键完全同路，跳过失效的键传输
-        r = hook_command("type", "Math.Abs(")
-        print(f"X12: 模拟键入回执: {r.get('commandResult')!r}", flush=True)
-        for _t2 in range(6):
-            doc = _hook_doc_safe()
-            if "open=True" in (doc.get("hintDebug") or ""):
-                ok = True
-                break
-            time.sleep(1.0)
-    if not ok:
-        # 44243562687 实锤：补全弹层没被收掉时 ( 的参数提示被互斥压住。
-        # 产品已改「敲 ( 即收补全、提示接棒」；此处再补真实重敲兜底：
-        # 收弹层→退格删掉 (→重敲 (，让提示在补全已关的新现场触发
-        for _r in range(3):
-            send_keys("{ESC}")
-            time.sleep(0.5)
-            send_keys("{BACKSPACE}")
-            time.sleep(0.5)
-            send_keys("+9")
-            time.sleep(1.2)
-            doc = _hook_doc_safe()
-            if "open=True" in (doc.get("hintDebug") or ""):
-                ok = True
-                break
+        # 探针留证：真实回报 try/sig/两浮层状态与文本尾
+        r = hook_command("hint_probe")
+        print(f"X12: 提示探针: {r.get('commandResult')!r}", flush=True)
     assert ok, f"参数提示未弹出: {doc.get('hintDebug', '')!r}"
     assert "Math.Abs" in (doc.get("hintDebug") or ""), f"提示非 Math.Abs 签名: {doc.get('hintDebug')!r}"
     shot("case-param-hint")
@@ -3456,6 +3405,43 @@ def install_session_keepalive():
     except Exception as e:
         print("keepalive 启动失败", e, flush=True)
 
+
+def c_html_cold_start():
+    """X14：.html 冷启动（1.1.1 v46c）——老板真机实锤：双击 .html 关联
+    档案，TaoPad 即闪退。云端复现同路径：O09 已确认无运行实例后，带
+    .html 参数冷启动（资源管理器双击打开的真实通道，与 X01 同族；附加
+    --testhook 仅为了打开验收通道，与崩溃路径无关），验收进程存活、
+    窗口在、无新崩溃记录、钩子正文含探针（文件真被加载）。"""
+    p = os.path.join(DOCS, "taopad-cold.html")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write("<!DOCTYPE html>\n<html><body><h1>coldstart-html-probe-771234</h1></body></html>")
+    wer_before = wer_count()
+    exe = find_exe()
+    subprocess.Popen([exe, "--testhook", p], close_fds=True)
+    ok = False
+    err = ""
+    for _ in range(15):
+        time.sleep(2.0)
+        if proc_count() >= 1 and app_alive():
+            ok = True
+            break
+        err = f"proc={proc_count()} alive={app_alive()}"
+    assert ok, f"X14: .html 冷启动未存活: {err} wer={wer_before}->{wer_count()}"
+    assert wer_count() == wer_before, (
+        f"X14: 冷启动 .html 出现新崩溃记录: {wer_before}->{wer_count()}")
+    got = ""
+    for _ in range(10):
+        time.sleep(1.5)
+        got = _hook_doc_safe().get("text", "")
+        if "coldstart-html-probe-771234" in got:
+            break
+    assert "coldstart-html-probe-771234" in got, f"X14: .html 未被加载: tail={got[-60:]!r}"
+    shot("case-html-coldstart")
+    # 收尾：冷启动实例优雅关闭（文档未改动，不会弹保存确认），不留残留进程
+    subprocess.run(["taskkill", "/IM", "TaoPad.exe"], capture_output=True, timeout=30)
+    time.sleep(2.0)
+
+
 def main():
     global WIN_HANDLE
     if sys.argv[1:2] == ["__worker"]:
@@ -3543,6 +3529,7 @@ def main():
         ("X12 参数提示", c_param_hint),
         ("X13 只读文件", c_readonly),
         ("O09 正常退出+崩溃检查", c_exit),
+        ("X14 .html 冷启动（真机闪退复现）", c_html_cold_start),
     ]
     part = (sys.argv[1] if len(sys.argv) > 1 else "").upper()
     if part in ("A", "B"):

@@ -1475,6 +1475,56 @@ public sealed class CodeEditor : Grid
         var t = RawText;
         Sel(t.Length, 0);
         Insert(text ?? "");
+        // v46c：插入后光标必须确定落在正文尾。富内核对 sel.Text 赋值后的
+        // 选区状态不作承诺（44250541252 X12 实锤：提示全程 open=False），
+        // 显式归位一次；补全/参数提示的触发按最终光标位置补跑——与真实
+        // 敲键后的 TextChanged 触发完全同路（TextChanged 在光标归位前可能
+        // 已按旧光标跑过一轮，这里显式补跑保证弹层按真实键入语义打开）。
+        Sel(RawText.Length, 0);
+        MaybeShowPopup();
+        MaybeShowParamHint();
+    }
+
+    /// <summary>
+    /// 测试通道专用（1.1.1 v46c）：把正文尾部的换行/空白剥掉并让光标
+    /// 落回尾端。为什么存在：云端 runner 迟到的键重放会在断言目标文本后
+    /// 塞 \r\n（多班实锤），收掉弹层并污染尾部验收；真实退格清尾又会被
+    /// 后续重放再次污染。命令硬通道删除不受键传输影响，且文本变化会让
+    /// 补全/参数提示按尾部语境重开——与真实编辑后的行为同路。仅
+    /// --testhook 可达，普通用户零影响。返回剥掉的字符数（0=本来就干净）。
+    /// </summary>
+    public int TrimTailWhitespace()
+    {
+        var t = RawText;
+        var trimmed = t.TrimEnd('\r', '\n', ' ', '\t');
+        if (trimmed.Length == t.Length) return 0;
+        Sel(trimmed.Length, t.Length - trimmed.Length);
+        SelTextRaw = "";
+        Sel(trimmed.Length, 0);
+        MaybeShowPopup();
+        MaybeShowParamHint();
+        return t.Length - trimmed.Length;
+    }
+
+    /// <summary>
+    /// 测试通道专用（1.1.1 v46c）：参数提示诊断探针。回报当前语言/光标/
+    /// 两浮层状态，以及按当前文本与光标跑 TryGetHint 的真实结果——
+    /// 44250541252 X12 只报 open=False，无法区分「触发失败」还是「弹了
+    /// 又被收」，探针补上这段盲区。只读不改状态，仅 --testhook 可达。
+    /// </summary>
+    public string HintProbe()
+    {
+        var t = RawText;
+        int caret = Math.Min(SelPos, t.Length);
+        var tail = t.Length <= 40 ? t : t.Substring(t.Length - 40);
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"probe:lang={_lang.Id} caret={caret} popup={(_popup.IsOpen ? 1 : 0)} hint={(_hintPopup.IsOpen ? 1 : 0)}");
+        if (ParamHints.TryGetHint(t, caret, _lang.Id, out var name, out var argIdx, out var sig, out var src))
+            sb.Append($" try=1 name={name} argIdx={argIdx} sig={sig} src={src}");
+        else
+            sb.Append(" try=0");
+        sb.Append($" tail={tail.Replace("\r", "\\r").Replace("\n", "\\n")}");
+        return sb.ToString();
     }
 
     public void Cut() { CopyToClipboard(); SelTextRaw = ""; }

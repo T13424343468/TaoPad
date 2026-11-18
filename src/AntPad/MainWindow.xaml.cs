@@ -140,6 +140,12 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
                 docTyped.Editor.TypeAtEnd(arg ?? "");
                 UpdateStatus();
                 return "ok:typed";
+            case "trim_tail":
+                if (Active is not { } docTrim) return "ERR no-doc";
+                return $"ok:trimmed={docTrim.Editor.TrimTailWhitespace()}";
+            case "hint_probe":
+                if (Active is not { } docProbe) return "ERR no-doc";
+                return docProbe.Editor.HintProbe();
             default:
                 return "ERR unknown-command:" + command;
         }
