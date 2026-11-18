@@ -195,13 +195,21 @@ public sealed class ArticlePreview : ContentControl
         return list;
     }
 
-    static Run MakeRun(string text, bool mono, bool bold, bool italic) => new()
+    static Run MakeRun(string text, bool mono, bool bold, bool italic)
     {
-        Text = text,
-        FontFamily = mono ? new FontFamily("Cascadia Mono, Consolas") : null,
-        FontWeight = bold ? Microsoft.UI.Text.FontWeights.Bold : Microsoft.UI.Text.FontWeights.Normal,
-        FontStyle = italic ? Windows.UI.Text.FontStyle.Italic : Windows.UI.Text.FontStyle.Normal,
-    };
+        // v46e（44259128446 班实锤）：FontFamily 直接置 null 会在 WinUI 抛
+        // COMException（'Unknown' is not a valid value for property 'FontFamily'），
+        // 异常被全局拦截续命后，UI 派发链进入半瘫——后续管道转发静默吞、
+        // 界面对输入无响应。非等宽 Run 不该碰 FontFamily 属性，保持继承。
+        var r = new Run
+        {
+            Text = text,
+            FontWeight = bold ? Microsoft.UI.Text.FontWeights.Bold : Microsoft.UI.Text.FontWeights.Normal,
+            FontStyle = italic ? Windows.UI.Text.FontStyle.Italic : Windows.UI.Text.FontStyle.Normal,
+        };
+        if (mono) r.FontFamily = new FontFamily("Cascadia Mono, Consolas");
+        return r;
+    }
 
     static Paragraph Block(List<Inline> runs, double top, double? size = null, double indent = 0)
     {

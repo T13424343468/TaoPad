@@ -1574,9 +1574,18 @@ def c_writing_panels():
     send_keys("^a{DEL}")
     type_text("# 标题一\n正文内容\n## 标题二\n- 列表项")
     time.sleep(0.5)
+    # v46e 回归断言（44259128446 实锤）：大纲/预览渲染曾因 FontFamily 置 null
+    # 炸出 UI 线程 COMException（拦截续命后派发链半瘫：X15/X16 转发静默吞、
+    # X07 键入不落账、钩子状态陈旧，全在异常发生之后）。面板开关后 trace.log
+    # 不得新增任何「UI 线程异常」。
+    if not hasattr(c_writing_panels, "_trace_mark0"):
+        c_writing_panels._trace_mark0 = trace_mark()
     toggle_panel("预览", "^+p")
     toggle_panel("大纲", "^+o")
     time.sleep(1.0)
+    new_trace = trace_since(c_writing_panels._trace_mark0)
+    bad = [l for l in new_trace if "UI 线程异常" in l]
+    assert not bad, f"X05: 面板渲染炸出 UI 线程异常（拦截续命仍拖瘫派发链）: {bad[:3]}"
     data = hook_dump()
     docs = data.get("docs") or []
     act = data.get("active", -1)
