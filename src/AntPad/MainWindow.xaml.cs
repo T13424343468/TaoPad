@@ -143,6 +143,13 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             case "trim_tail":
                 if (Active is not { } docTrim) return "ERR no-doc";
                 return $"ok:trimmed={docTrim.Editor.TrimTailWhitespace()}";
+            case "trim_and_items":
+                // v46d：清尾+触发+读候选一次成型（原子）。幽灵键流实锤
+                // （44257837793）：清尾后下一波重放立即塞回，分步轮询永远
+                // 赶不上污染速度；原子化后只要 UI 线程空出一拍就能拿全候选
+                if (Active is not { } docTI) return "ERR no-doc";
+                docTI.Editor.TrimTailWhitespace();
+                return "ok:items=[" + string.Join(",", docTI.Editor.PopupItems) + "]";
             case "hint_probe":
                 if (Active is not { } docProbe) return "ERR no-doc";
                 return docProbe.Editor.HintProbe();

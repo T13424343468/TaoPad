@@ -1680,22 +1680,23 @@ def c_csharp_completion():
                 last = None
         time.sleep(1.0)
     assert typed, f"X07: 键入未落账: {(doc or {}).get('text', '')[-40:]!r}"
-    doc = {}
-    items = []
-    deadline = time.time() + 30
+    # 44257837793 实锤：幽灵键流持续污染尾随换行，分步「清尾→读候选」永远
+    # 赶不上污染速度——改走原子命令 trim_and_items（UI 线程内清尾+触发+读
+    # 候选一次成型），只要空出一拍就能拿全候选
+    res = ""
+    ok = False
+    deadline = time.time() + 60
     while time.time() < deadline:
-        doc = _hook_doc_safe()
-        items = doc.get("completionItems") or []
-        if "Add" in items and "Count" in items:
+        r = hook_command("trim_and_items")
+        res = r.get("commandResult") or ""
+        if res.startswith("ok:items=[") and "Add" in res and "Count" in res:
+            ok = True
             break
-        t = doc.get("text") or ""
-        if not t.endswith("list.") and t.rstrip("\r\n \t").endswith("list.") and trims < 8:
-            hook_command("trim_tail")   # 重放又塞了尾：剥掉让弹层重开
-            trims += 1
-        time.sleep(2.0)
-    assert "Add" in items and "Count" in items, (
-        f"X07: 补全弹层候选缺语义成员: {items[:12]!r} 诊断={doc.get('completionDebug','')!r}"
-        f" 文本尾={doc.get('text','')[-24:]!r}")
+        time.sleep(1.0)
+    if not ok:
+        doc = _try_hook_dump(timeout=25.0) or {}
+    assert ok, (f"X07: 补全弹层候选缺语义成员: {res[:160]!r}"
+                f" 诊断={(doc or {}).get('completionDebug','')!r}")
     shot("case-csharp-intel")
     esc_cleanup()
 
