@@ -3457,6 +3457,105 @@ def c_html_cold_start():
 c_html_cold_start.self_launch = True   # 自带拉起进程，绕过 case() 的存活守卫
 
 
+def _try_hook_dump(timeout=25.0):
+    """钩子快照安全版：界面冻死/超时返回 None 而不是抛异常。"""
+    try:
+        return hook_dump(timeout=timeout)
+    except Exception:
+        return None
+
+
+def _find_window_by_title(fragment, timeout=60):
+    """枚举顶层窗口，返回标题含 fragment 的句柄（找不到返回 0）。"""
+    import win32gui
+    found = [0]
+
+    def _cb(hwnd, _):
+        try:
+            if win32gui.IsWindowVisible(hwnd) and fragment in (win32gui.GetWindowText(hwnd) or ""):
+                found[0] = hwnd
+                return False
+        except Exception:
+            pass
+        return True
+
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        win32gui.EnumWindows(_cb, None)
+        if found[0]:
+            return found[0]
+        time.sleep(1.0)
+    return 0
+
+
+def c_big_color_open():
+    """X15：大号着色档案打开不冻界面（1.1.1 v46d）——老板真机实锤：
+    双击 .html 窗口出来后一直转卡住。此前唯一的大文件用例（X02）是
+    5.6MB 纯文本滚动，「几十 MB 着色档案走编辑管线」零覆盖。本用例
+    生成 ~30MB 网页档案转发打开（与双击同管线），验收=钩子快照能回来
+    （快照经 UI 线程，回不来=界面冻死）、活动档案就是它、正文含探针。"""
+    p = os.path.join(DOCS, "taopad-big-color.html")
+    if not os.path.exists(p) or os.path.getsize(p) < 25_000_000:
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("<!DOCTYPE html>\n<html><body>bigcolor-probe-920831\n")
+            line = '<div class="item-123" style="color:#123456;padding:2px;margin:0;">内容 0123456789 abcdefghij</div>\n'
+            for _ in range(430_000):
+                f.write(line)
+    esc_cleanup()
+    _forward_open(p)
+    doc = {}
+    ok = False
+    deadline = time.time() + 150
+    while time.time() < deadline:
+        data = _try_hook_dump(timeout=25.0)
+        if data is not None:
+            docs = data.get("docs") or []
+            act = data.get("active", -1)
+            doc = docs[act] if 0 <= act < len(docs) else (docs[-1] if docs else {})
+            if doc.get("path", "").endswith("taopad-big-color.html"):
+                ok = True
+                break
+        time.sleep(3.0)
+    assert ok, (f"X15: 30MB 着色档案未在时限内加载/界面无响应: "
+                f"path={(doc or {}).get('path', '')!r} tail={(doc or {}).get('text', '')[-40:]!r}")
+    assert "bigcolor-probe-920831" in (doc.get("text") or ""), "X15: 大文件正文未进编辑器"
+    shot("case-big-color")
+    # 复验一次快照仍能回来：着色批次不是把界面拖死后才回执
+    assert _try_hook_dump(timeout=25.0) is not None, "X15: 首次快照后界面已冻死（快照回不来）"
+
+
+def c_huge_boundary():
+    """X16：50MB 硬上限边界（1.1.1 v46d）——超过 50_000_000 字节走
+    HugeFileViewer 只读快看（编辑器不接），此前零覆盖。验收=快看窗
+    出现（标题含「快看（只读）」）、编辑器档案列表里没有它、主窗口
+    仍存活。"""
+    p = os.path.join(DOCS, "taopad-huge-boundary.html")
+    if not os.path.exists(p) or os.path.getsize(p) <= 50_000_000:
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("<!DOCTYPE html>\n<html><body>huge-boundary-probe-630742\n")
+            chunk = '<div class="fill" style="color:#334455;">边界填充 0123456789</div>\n' * 1000
+            while os.path.getsize(p) <= 50_500_000:
+                f.write(chunk)
+    esc_cleanup()
+    _forward_open(p)
+    hwnd = _find_window_by_title("快看（只读）", timeout=90)
+    assert hwnd, "X16: 超限文件未弹只读快看窗（疑似走了编辑管线或卡死）"
+    data = _try_hook_dump(timeout=25.0)
+    got_paths = " | ".join((d.get("path") or "") for d in ((data or {}).get("docs") or []))
+    assert "taopad-huge-boundary.html" not in got_paths, (
+        f"X16: 超限文件被编辑器接走（应走快看）: {got_paths!r}")
+    assert app_alive(), "X16: 打开超限文件后主窗口没了"
+    shot("case-huge-boundary")
+    # 收尾：关掉快看窗，不留多余窗口
+    try:
+        import win32gui as _wg
+        import win32con as _wc
+        _wg.PostMessage(hwnd, _wc.WM_CLOSE, 0, 0)
+    except Exception:
+        pass
+    time.sleep(1.5)
+
+
 def main():
     global WIN_HANDLE
     if sys.argv[1:2] == ["__worker"]:
@@ -3543,6 +3642,8 @@ def main():
         ("X11 书签", c_bookmarks),
         ("X12 参数提示", c_param_hint),
         ("X13 只读文件", c_readonly),
+        ("X15 30MB着色档案打开不冻界面", c_big_color_open),
+        ("X16 50MB硬上限走快看", c_huge_boundary),
         ("O09 正常退出+崩溃检查", c_exit),
         ("X14 .html 冷启动（真机闪退复现）", c_html_cold_start),
     ]
