@@ -459,10 +459,17 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
     void OnWatchedFileChanged(object sender, FileSystemEventArgs e)
     {
         if (_suppressWatch) return;
-        var doc = Active;
-        if (doc is null || doc.FilePath is null || !_watchPath!.Equals(doc.FilePath, StringComparison.OrdinalIgnoreCase)) return;
-        TraceLog.Write($"外部修改：检测到 {doc.Title}");
-        DispatcherQueue.TryEnqueue(() => _ = HandleExternalChangeAsync(doc));
+        // FileSystemWatcher 回调走线程池：直接摸 Tabs.SelectedItem 是跨线程 XAML
+        // 访问，必炸 COMException（云测 crash.log 实锤：0xE0434352 原生崩溃，
+        // 退出链被掐断→进程永驻；外部修改对话框被吞→X17 挂账）。整段改投 UI 线程。
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_suppressWatch) return;
+            var doc = Active;
+            if (doc is null || doc.FilePath is null || !_watchPath!.Equals(doc.FilePath, StringComparison.OrdinalIgnoreCase)) return;
+            TraceLog.Write($"外部修改：检测到 {doc.Title}");
+            _ = HandleExternalChangeAsync(doc);
+        });
     }
 
     async Task HandleExternalChangeAsync(Doc doc)
