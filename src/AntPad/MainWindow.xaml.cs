@@ -454,6 +454,7 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
         if (_suppressWatch) return;
         var doc = Active;
         if (doc is null || doc.FilePath is null || !_watchPath!.Equals(doc.FilePath, StringComparison.OrdinalIgnoreCase)) return;
+        TraceLog.Write($"外部修改：检测到 {doc.Title}");
         DispatcherQueue.TryEnqueue(() => _ = HandleExternalChangeAsync(doc));
     }
 
@@ -463,6 +464,7 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
         if (doc.Dirty)
         {
             doc.Tab.Header = doc.Title + "（外部已修改）";
+            TraceLog.Write($"外部修改：未保存仅提醒 {doc.Title}");
             return;   // 有未保存改动不打断，仅提醒
         }
         var dlg = new ContentDialog
@@ -474,7 +476,9 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = Content.XamlRoot,
         };
-        if (await ShowDialogSafe(dlg) == ContentDialogResult.Primary)
+        var choice = await ShowDialogSafe(dlg);
+        TraceLog.Write($"外部修改：对话框已确认 choice={choice}");
+        if (choice == ContentDialogResult.Primary)
         {
             _suppressWatch = true;
             try { await LoadFileAsync(doc, doc.FilePath); }

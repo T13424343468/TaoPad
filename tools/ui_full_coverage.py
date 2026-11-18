@@ -3427,9 +3427,13 @@ def c_html_cold_start():
     p = os.path.join(DOCS, "taopad-cold.html")
     with open(p, "w", encoding="utf-8") as f:
         f.write("<!DOCTYPE html>\n<html><body><h1>coldstart-html-probe-771234</h1></body></html>")
+    # 一并验多文件冷启动：一口气带两个档案，都要进页签（v46d 增补）
+    ptxt = os.path.join(DOCS, "taopad-cold2.txt")
+    with open(ptxt, "w", encoding="utf-8") as f:
+        f.write("coldstart-txt-probe-447788\n")
     wer_before = wer_count()
     exe = find_exe()
-    subprocess.Popen([exe, "--testhook", p], close_fds=True)
+    subprocess.Popen([exe, "--testhook", p, ptxt], close_fds=True)
     ok = False
     err = ""
     for _ in range(15):
@@ -3442,12 +3446,17 @@ def c_html_cold_start():
     assert wer_count() == wer_before, (
         f"X14: 冷启动 .html 出现新崩溃记录: {wer_before}->{wer_count()}")
     got = ""
+    docs = []
     for _ in range(10):
         time.sleep(1.5)
-        got = _hook_doc_safe().get("text", "")
-        if "coldstart-html-probe-771234" in got:
+        data = _try_hook_dump(timeout=25.0)
+        docs = (data or {}).get("docs") or []
+        got = " ".join((d.get("text") or "") for d in docs)
+        if "coldstart-html-probe-771234" in got and "coldstart-txt-probe-447788" in got:
             break
     assert "coldstart-html-probe-771234" in got, f"X14: .html 未被加载: tail={got[-60:]!r}"
+    assert "coldstart-txt-probe-447788" in got, (
+        f"X14: 多文件冷启动第二个档案未进页签: {' | '.join((d.get('path') or '') for d in docs)!r}")
     shot("case-html-coldstart")
     # 收尾：冷启动实例优雅关闭（文档未改动，不会弹保存确认），不留残留进程
     subprocess.run(["taskkill", "/IM", "TaoPad.exe"], capture_output=True, timeout=30)
@@ -3556,6 +3565,125 @@ def c_huge_boundary():
     time.sleep(1.5)
 
 
+def c_external_change():
+    """X17：外部修改提醒（1.1.1 v46d）——文件监视对活动档案的外部改动：
+    干净档案弹「文件已在外部修改」对话框（ESC=暂不，内容不丢）；有未保存
+    改动时仅提醒不打断。断言走 trace 留证（产品侧新增：检测到/对话框已
+    确认/未保存仅提醒）。"""
+    p = os.path.join(DOCS, "taopad-watch.txt")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write("watch-probe-v1\n")
+    esc_cleanup()
+    _forward_open(p)
+    mark = trace_mark()
+    # 干净档案：外部改 → 弹对话框 → ESC 暂不 → 正文保持 v1
+    with open(p, "w", encoding="utf-8") as f:
+        f.write("watch-probe-v2-external\n")
+    ok = False
+    ev = []
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        ev = trace_since(mark)
+        if any("外部修改：对话框已确认" in l for l in ev):
+            ok = True
+            break
+        time.sleep(1.0)
+    if not ok:
+        r = hook_command("hint_probe")   # 探针留证：区分没检测到与界面冻住
+        print(f"X17: 提示探针: {r.get('commandResult')!r}", flush=True)
+    assert ok, f"X17: 干净档案外部修改未弹对话框: {' | '.join(ev)[-160:]!r}"
+    send_keys("{ESC}")
+    time.sleep(1.0)
+    doc = _hook_doc_safe()
+    assert "watch-probe-v1" in (doc.get("text") or ""), "X17: 暂不后正文被改"
+    # 未保存改动：外部改 → 仅提醒，不弹框
+    mark2 = trace_mark()
+    hook_command("type", "dirty ")
+    time.sleep(0.5)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write("watch-probe-v3-external\n")
+    ok2 = False
+    ev2 = []
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        ev2 = trace_since(mark2)
+        if any("外部修改：未保存仅提醒" in l for l in ev2):
+            ok2 = True
+            break
+        time.sleep(1.0)
+    assert ok2, f"X17: 脏档案外部修改未走仅提醒分支: {' | '.join(ev2)[-160:]!r}"
+    shot("case-external-change")
+
+
+def c_snippet_expand():
+    """X18：代码片段 Tab 展开（1.1.1 v46d）——缩写后真实 Tab 展开为模板
+    （$0 落光标）。C# 的 cw→Console.WriteLine()；此前零覆盖。"""
+    editor_open_clean()
+    if not menu_lang_verified("C#"):
+        r = hook_command("set_language", "C#")
+        doc0 = _hook_doc_safe()
+        assert doc0.get("lang") == "C#", f"X18: 语言未切到 C#: {doc0.get('lang')!r}"
+    expanded = False
+    doc = {}
+    for attempt in range(3):
+        clear_editor_settled()
+        r = hook_command("type", "cw")
+        print(f"X18: 键入回执: {r.get('commandResult')!r}", flush=True)
+        send_keys("{TAB}")
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            doc = _hook_doc_safe()
+            if "Console.WriteLine(" in (doc.get("text") or ""):
+                expanded = True
+                break
+            time.sleep(1.0)
+        if expanded:
+            break
+        print(f"X18: 第{attempt + 1}轮未展开: {(doc or {}).get('text', '')[-30:]!r}", flush=True)
+    assert expanded, f"X18: 片段未展开: {(doc or {}).get('text', '')[-40:]!r}"
+    shot("case-snippet")
+
+
+def c_binary_open():
+    """X19：二进制档案打开不炸（1.1.1 v46d）——此前零覆盖。当前产品
+    行为=按文本解出乱码进编辑器；验不崩、钩子活、档案在场。若日后改为
+    拒开/转快看，本用例会红出来逼着更新口径。"""
+    p = os.path.join(DOCS, "taopad-bin.png")
+    with open(p, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 40 + b"\x00\x01\x02binary-probe-518234")
+    esc_cleanup()
+    _forward_open(p)
+    data = _try_hook_dump(timeout=25.0)
+    assert data is not None, "X19: 打开二进制档案后界面无响应"
+    assert app_alive(), "X19: 打开二进制档案后进程没了"
+    docs = data.get("docs") or []
+    ok = any((d.get("path") or "").endswith("taopad-bin.png") for d in docs)
+    assert ok, f"X19: 二进制档案未进页签: {' | '.join((d.get('path') or '') for d in docs)!r}"
+    shot("case-binary-open")
+
+
+def c_special_filename():
+    """X20：特殊字符档案名打开+读回（1.1.1 v46d）——中文/空格/括号/
+    「&」/全角加号，此前零覆盖。转发打开（与双击同管线）+ 内容一致。"""
+    p = os.path.join(DOCS, "TaoPad 特殊 (1) & 测试 ＋ 档案.txt")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write("special-name-probe-260917\n")
+    esc_cleanup()
+    _forward_open(p)
+    doc = {}
+    ok = False
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        doc = _hook_doc_safe()
+        if (doc.get("path") or "").endswith("＋ 档案.txt"):
+            ok = True
+            break
+        time.sleep(1.0)
+    assert ok, f"X20: 特殊名档案未打开: {(doc or {}).get('path', '')!r}"
+    assert "special-name-probe-260917" in (doc.get("text") or ""), "X20: 特殊名档案内容读错"
+    shot("case-special-name")
+
+
 def main():
     global WIN_HANDLE
     if sys.argv[1:2] == ["__worker"]:
@@ -3644,6 +3772,10 @@ def main():
         ("X13 只读文件", c_readonly),
         ("X15 30MB着色档案打开不冻界面", c_big_color_open),
         ("X16 50MB硬上限走快看", c_huge_boundary),
+        ("X17 外部修改提醒", c_external_change),
+        ("X18 代码片段Tab展开", c_snippet_expand),
+        ("X19 二进制档案打开不炸", c_binary_open),
+        ("X20 特殊字符档案名", c_special_filename),
         ("O09 正常退出+崩溃检查", c_exit),
         ("X14 .html 冷启动（真机闪退复现）", c_html_cold_start),
     ]
