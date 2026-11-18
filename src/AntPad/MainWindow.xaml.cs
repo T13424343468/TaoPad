@@ -338,10 +338,11 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             doc.Editor.SyntaxLanguage = LangDef.FromFileName(path);
             doc.Eol = DetectEol(text);
             // v39.2（老板令）：撤 2MB 只读护栏——大文件可编辑可保存；
-            // 50MB 打开硬上限保留（渲染内存安全线）。ReadOnly 字段保留给
-            // 手工只读/无权限等真实场景。
-            doc.ReadOnly = false;
-            doc.Editor.IsReadOnly = false;
+            // 50MB 打开硬上限保留（渲染内存安全线）。
+            // v39.4（老板拍板 2026-11-18）：带只读属性的档案打开即挡编辑、
+            // 状态栏标（只读）——防「改半天保存才炸」；确要改动走另存为。
+            doc.ReadOnly = fi.IsReadOnly;
+            doc.Editor.IsReadOnly = fi.IsReadOnly;
             SetDirty(doc, false);
             doc.Tab.Header = doc.Title;
             PushRecent(path);
@@ -696,6 +697,10 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             File.Move(tmp, path, true);
             doc.FilePath = path;
             doc.Tab.Header = doc.Title;
+            // 另存为后按新文件属性重估只读：只读档另存新路径即恢复可编辑
+            try { doc.ReadOnly = new FileInfo(path).IsReadOnly; }
+            catch { /* 属性读不到按可编辑处理，不拦保存 */ }
+            doc.Editor.IsReadOnly = doc.ReadOnly;
             // 按新扩展名自动切换着色语言：另存为 .sql 后立即按 SQL 着色，
             // 不再沿用打开时的旧语言（修 test.sql 显示 C# 一类问题）
             var langByExt = AntPad.Syntax.LangDef.FromFileName(path);

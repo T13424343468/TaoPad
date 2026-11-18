@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 TaoPad 云端真机全功能界面自动化（v14，直呼回传修复版）
 每次界面元素枚举/点击都在独立 Python 子进程里完成——
@@ -1863,10 +1863,9 @@ def c_param_hint():
 
 
 def c_readonly():
-    """X13：只读属性的文件（1.1.1）——锁现状：v39.2（老板令）撤护栏后，
-    打开时 doc.ReadOnly 无条件 false，全仓无置位入口（44225139583 实锤，
-    用例原断言 readOnly 置位与产品现状脱节）。本用例验收：带 +R 属性的
-    档案打开不炸、正文正确、可正常键入；「+R 要不要置只读」归老板拍板。"""
+    """X13：只读属性的文件（1.1.1）——v39.4（老板拍板 2026-11-18）：
+    带 +R 属性的档案打开即 readOnly 置位、状态栏标（只读）、键入被挡；
+    另存新路径恢复可编辑。以钩子通道验收。"""
     # 44217756849 实锤：上一轮失败残留 +R 未清，重跑写文件必 PermissionError
     # ——先清属性再落正文；打开必须以钩子 title/path 验收，脏则重开。
     os.system(f'attrib -R "{FILE_RO}"')
@@ -1890,25 +1889,22 @@ def c_readonly():
             print(f"X13: 第{i + 1}次打开未命中: title={doc.get('title')!r}", flush=True)
         assert opened, "X13: 只读文件两轮未打开"
         doc = _hook_doc_safe()
+        assert doc.get("readOnly") is True, f"X13: 只读未置位: {doc.get('readOnly')!r}"
+        assert "（只读）" in doc.get("statusText", ""), \
+            f"X13: 状态行未标注只读: {doc.get('statusText', '')!r}"
         assert "readonly-probe" in (doc.get("text") or ""), \
             f"X13: 正文缺失: {(doc.get('text') or '')[:60]!r}"
+        # 键入被挡：真实按键三轮尝试，正文必须始终不见 ro-typed
         click_editor()
-        clear_editor_settled()
-        typed = False
+        blocked = True
         for _ in range(3):
             send_keys("ro-typed")
-            deadline = time.time() + 6
-            while time.time() < deadline:
-                doc = _hook_doc_safe()
-                if "ro-typed" in (doc.get("text") or ""):
-                    typed = True
-                    break
-                time.sleep(1.0)
-            if typed:
+            time.sleep(1.0)
+            doc = _hook_doc_safe()
+            if "ro-typed" in (doc.get("text") or ""):
+                blocked = False
                 break
-            focus_main()
-            click_editor()
-        assert typed, "X13: 现状应可键入，键入未落账"
+        assert blocked, f"X13: 只读文件仍可键入: {(doc.get('text') or '')[-40:]!r}"
         esc_cleanup()
     finally:
         os.system(f'attrib -R "{FILE_RO}"')
