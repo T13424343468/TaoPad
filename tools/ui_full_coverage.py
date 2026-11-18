@@ -1641,6 +1641,80 @@ def c_fountain_highlight():
     shot("case-fountain")
 
 
+# X21 各语言真实样例（老板 2026-11-18 令）：此前多数代码语言只有「键入一行+
+# 注释切换」通用路径，没有按各自最日常的写法真实落过一段内容。这里每语言
+# 一段典型多行样例（各语言平时最常写的形态），逐语言验证语言切换落账、
+# 正文完整不缺行、状态栏字数同步；专属深测（补全/撤销/渲染色）由
+# X04/X05/X06/X07/X08/X12/X18 承担，本用例补齐「每种语言都真写过」。
+LANG_SAMPLES = {
+    "C / C++": (
+        '#include <cstdio>\nint main() {\n    for (int i = 0; i < 3; i++) {\n        printf("hi %d\\n", i);\n    }\n    return 0;\n}',
+        "printf",
+    ),
+    "Java": (
+        "public class Demo {\n    public static void main(String[] args) {\n        for (int i = 0; i < 2; i++) {\n            System.out.println(\"i=\" + i);\n        }\n    }\n}",
+        "System.out.println",
+    ),
+    "JavaScript / TypeScript": (
+        'const greet = (name) => {\n  for (let i = 0; i < 2; i++) {\n    console.log(`hi ${name} ${i}`);\n  }\n};\ngreet("世界");',
+        "console.log",
+    ),
+    "Go": (
+        'package main\n\nimport "fmt"\n\nfunc main() {\n    for i := 0; i < 2; i++ {\n        fmt.Println("hi", i)\n    }\n}',
+        "fmt.Println",
+    ),
+    "Rust": (
+        'fn main() {\n    for i in 0..2 {\n        println!("hi {}", i);\n    }\n}',
+        "println!",
+    ),
+    "C 风格其他 (Swift/Kotlin/PHP/Dart…)": (
+        'import Foundation\n\nfor i in 0..<2 {\n    print("hi \\(i)")\n}',
+        "print(",
+    ),
+    "Python": (
+        'def greet(name):\n    for i in range(2):\n        print(f"hi {name} {i}")\n\ngreet("世界")',
+        "greet(\"世界\")",
+    ),
+    "JSON": (
+        '{\n  "name": "测试",\n  "count": 2,\n  "tags": ["a", "b"],\n  "nested": {"ok": true, "pi": 3.14}\n}',
+        '"nested"',
+    ),
+    "XML / HTML": (
+        '<?xml version="1.0"?>\n<note id="1">\n  <to>老板</to>\n  <body>各语言真实样例</body>\n</note>',
+        "<to>老板</to>",
+    ),
+    "SQL": (
+        "SELECT id, name FROM users\nWHERE age > 18 AND city = '北京'\nORDER BY id DESC\nLIMIT 10;",
+        "ORDER BY id DESC",
+    ),
+}
+
+
+def c_lang_real_samples():
+    """X21：各语言真实样例编写——粘贴一段该语言日常形态的多行内容，
+    验证：菜单/钩子双路切语言落账、样例正文完整落位（关键行在钩子正文
+    里）、状态栏字数同步。逐语言循环，红则报明是哪种语言。"""
+    for lang, (sample, sig) in LANG_SAMPLES.items():
+        editor_open_clean()
+        if not menu_lang_verified(lang):
+            r = hook_command("set_language", lang)
+            doc0 = _hook_doc_safe()
+            assert doc0.get("lang") == lang, f"X21[{lang}]: 语言未切: {doc0.get('lang')!r}"
+        clear_editor_settled()
+        paste_verified(sample)
+        time.sleep(0.6)
+        data = hook_dump()
+        docs = data.get("docs") or []
+        act = data.get("active", -1)
+        doc = docs[act] if 0 <= act < len(docs) else (docs[-1] if docs else {})
+        text = doc.get("text", "")
+        assert sig in text, f"X21[{lang}]: 样例关键行缺失: {text[-80:]!r}"
+        assert doc.get("lang") == lang, f"X21[{lang}]: 语言自报不符: {doc.get('lang')!r}"
+        status_hard("字数", doc, f"X21[{lang}]")
+        print(f"X21[{lang}]: 样例落位 OK", flush=True)
+    shot("case-lang-real-samples")
+
+
 def c_csharp_completion():
     """X07：C# 全量智能补全（1.1.0）——词表先弹、Roslyn 合并，
     弹层候选走 completionItems 硬通道，断言语义成员（Add/Count）可达。
@@ -3817,6 +3891,7 @@ def main():
         ("X18 代码片段Tab展开", c_snippet_expand),
         ("X19 二进制档案打开不炸", c_binary_open),
         ("X20 特殊字符档案名", c_special_filename),
+        ("X21 各语言真实样例编写", c_lang_real_samples),
         ("O09 正常退出+崩溃检查", c_exit),
         ("X14 .html 冷启动（真机闪退复现）", c_html_cold_start),
     ]
