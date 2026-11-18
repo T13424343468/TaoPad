@@ -145,6 +145,29 @@ string TextOf(string line, List<TokenSpan> toks, TokKind kind) =>
     Tokenizer.Tokenize(LangDef.Markdown, "a `code` b **bold**", ref st, toks);
     Check("T15 Markdown code/粗体", toks.Any(t => t.Kind == TokKind.String) && toks.Any(t => t.Kind == TokKind.Control), string.Join(";", toks));
 }
+// T15b Markdown 代码围栏：围栏内 ** 与 ` 不按行内标记解析（备查蓝项落测 2026-11-18）
+{
+    string doc = "```python\nx = a**b**c\n```\n**real bold**";
+    var toks = new List<TokenSpan>();
+    Tokenizer.TokenizeDocument(LangDef.Markdown, doc, toks);
+    string ctrl = TextOf(doc, toks, TokKind.Control);
+    Check("T15b 围栏内**不当粗体", !ctrl.Contains("a**b**c") && ctrl.Contains("**real bold**"), ctrl);
+}
+// T15c 波浪线围栏同理；收栏后行内标记恢复
+{
+    string doc = "~~~\n**fence**\n~~~\nplain **x**";
+    var toks = new List<TokenSpan>();
+    Tokenizer.TokenizeDocument(LangDef.Markdown, doc, toks);
+    string ctrl = TextOf(doc, toks, TokKind.Control);
+    Check("T15c 波浪线围栏同口径", !ctrl.Contains("**fence**") && ctrl.Contains("**x**"), ctrl);
+}
+// T15d 未闭合围栏吞到文末（CommonMark 口径锁定）
+{
+    string doc = "```\n**unclosed";
+    var toks = new List<TokenSpan>();
+    Tokenizer.TokenizeDocument(LangDef.Markdown, doc, toks);
+    Check("T15d 未闭合围栏不炸粗体", !toks.Any(t => t.Kind == TokKind.Control), string.Join(";", toks));
+}
 // T16 成员名（紧邻点号）
 {
     var toks = new List<TokenSpan>();
@@ -408,6 +431,12 @@ var sample = "中文sample";
 {
     var s = WritingDoc.CountWords("");
     Check("O04 空文本字数为零", s.Words == 0 && s.Chars == 0 && s.Lines == 0, $"{s.Words}/{s.Chars}/{s.Lines}");
+}
+// O07 字数：尾行口径锁定（换行结尾按编辑器行号口径 +1；语义调整属需求决策
+// 归老板拍板，先锁现状防回归——2026-11-18）
+{
+    var s = WritingDoc.CountWords("abc\n");
+    Check("O07 尾行口径锁定", s.Lines == 2 && s.Words == 1, $"{s.Lines}/{s.Words}");
 }
 // O05 快照保存与读取（写真实数据根，测试允许）
 {

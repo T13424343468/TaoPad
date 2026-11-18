@@ -7,7 +7,7 @@ public enum TokKind { Text, Keyword, Control, String, Comment, DocComment, Numbe
 
 public readonly record struct TokenSpan(int Start, int Length, TokKind Kind);
 
-public struct HlState { public bool BlockComment; public bool DocBlock; public bool XmlTag; }
+public struct HlState { public bool BlockComment; public bool DocBlock; public bool XmlTag; public bool MarkdownFence; }
 
 /// <summary>语言定义：关键字表 + 模式开关。</summary>
 public sealed class LangDef
@@ -328,7 +328,7 @@ public static class Tokenizer
     public static void Tokenize(LangDef lang, string text, ref HlState st, List<TokenSpan> output)
     {
         if (lang.FountainMode) { FountainInline(text, output); return; }
-        if (lang.MarkdownMode) { Markdown(lang, text, output); return; }
+        if (lang.MarkdownMode) { Markdown(lang, text, ref st, output); return; }
         if (lang.XmlMode) { XmlMode(lang, text, ref st, output); return; }
 
         int i = 0, n = text.Length;
@@ -571,9 +571,32 @@ public static class Tokenizer
         st.XmlTag = inTag;
     }
 
-    static void Markdown(LangDef lang, string text, List<TokenSpan> output)
+    static void Markdown(LangDef lang, string text, ref HlState st, List<TokenSpan> output)
     {
         if (text.Length == 0) return;
+
+        // 代码围栏（备查蓝项落修 2026-11-18）：``` / ~~~ 起整段代码块，块内
+        // ** 与 ` 一律不按行内标记解析；围栏行与块内行整行按代码着色。
+        // 开栏可带信息串（```csharp），收栏须为纯围栏字符行；不跨行传递时
+        // 未闭合围栏吞到文末（CommonMark 同口径）。
+        var trimmed = text.TrimStart();
+        char fenceChar = trimmed.Length > 0 && (trimmed[0] == '`' || trimmed[0] == '~') ? trimmed[0] : '\0';
+        int fenceRun = 0;
+        if (fenceChar != '\0') while (fenceRun < trimmed.Length && trimmed[fenceRun] == fenceChar) fenceRun++;
+        if (st.MarkdownFence)
+        {
+            // 围栏内：纯围栏字符行 = 收栏，其余（含带信息串的 ```）都是代码内容
+            if (fenceRun >= 3 && trimmed[fenceRun..].Trim().Length == 0)
+                st.MarkdownFence = false;
+            output.Add(new(0, text.Length, TokKind.String));
+            return;
+        }
+        if (fenceRun >= 3)
+        {
+            st.MarkdownFence = true;
+            output.Add(new(0, text.Length, TokKind.String));
+            return;
+        }
 
         // 标题行
         int h = 0;
