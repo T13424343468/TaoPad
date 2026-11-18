@@ -134,7 +134,17 @@ jobs:
           Set-Content -Path $assocTxt -Value "assoc-probe-734912" -Encoding UTF8
           Start-Process $assocTxt
           Start-Sleep -Seconds 12
-          if (-not (Get-Process TaoPad -ErrorAction SilentlyContinue)) { throw "txt 关联启动后 TaoPad 进程不在（关联链路断/被别的程序接走）" }
+          if (-not (Get-Process TaoPad -ErrorAction SilentlyContinue)) {
+            # 先求证再定谳：取证留全（谁接走了/注册表实态/现场截图）再失败
+            Write-Host "TaoPad 未被唤起，取证后定性："
+            Write-Host "存活进程采样: $((Get-Process | Where-Object { $_.ProcessName -match 'notepad|TaoPad|OpenWith|SystemSettings' } | ForEach-Object { "$($_.Id):$($_.ProcessName)" }) -join ', ')"
+            Write-Host "HKCU UserChoice: $(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.txt\UserChoice' -ErrorAction SilentlyContinue | Out-String)"
+            Write-Host "HKCU Progids: $(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.txt' -ErrorAction SilentlyContinue | Out-String)"
+            Write-Host "HKLM .txt 默认: $(Get-ItemProperty 'Registry::HKEY_CLASSES_ROOT\.txt' -ErrorAction SilentlyContinue | Out-String)"
+            Write-Host "ProgId 命令: $(Get-ItemProperty 'Registry::HKEY_CLASSES_ROOT\TaoPad.TextFile\shell\open\command' -ErrorAction SilentlyContinue | Out-String)"
+            Snap "evidence\assoc-launch-failed.png"
+            throw "txt 关联启动后 TaoPad 进程不在（关联链路断/被别的程序接走）"
+          }
           Snap "evidence\assoc-launch.png"
           Get-Process TaoPad -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 2
