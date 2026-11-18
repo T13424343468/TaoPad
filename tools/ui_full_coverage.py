@@ -1710,7 +1710,10 @@ def c_lang_real_samples():
         text = doc.get("text", "")
         assert sig in text, f"X21[{lang}]: 样例关键行缺失: {text[-80:]!r}"
         assert doc.get("lang") == lang, f"X21[{lang}]: 语言自报不符: {doc.get('lang')!r}"
-        status_hard("字数", doc, f"X21[{lang}]")
+        # 44324798289 X21 定谳：「字数」段仅文章类语言显示（StatusLineFor
+        # 的 IsArticle 口径，X05 Markdown 命中、代码语言本就没有）；X21 全是
+        # 代码语言，改断言恒在的「行数」段，字数由写作语言用例（X05）承担。
+        status_hard("行数", doc, f"X21[{lang}]")
         print(f"X21[{lang}]: 样例落位 OK", flush=True)
     shot("case-lang-real-samples")
 
