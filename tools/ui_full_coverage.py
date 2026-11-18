@@ -1729,7 +1729,10 @@ def c_csharp_completion():
         assert doc0.get("lang") == "C#", (
             f"X07: 语言未切到 C#: lang={doc0.get('lang')!r} 回执={r.get('commandResult')!r}")
     clear_editor_settled()
-    paste_verified("var list = new List<string>();")
+    # 44324138369 X07 定谳：样例缺 using 引头 → List<string> 不可解析 →
+    # 语义引擎按设计返回空（LogicTests G01 带引头所以全绿），弹层永远
+    # 空表。补上 using System.Collections.Generic; 与 G01 口径对齐。
+    paste_verified("using System.Collections.Generic;\nvar list = new List<string>();")
     time.sleep(0.8)
     r = hook_command("type", "\n")
     print(f"X07: 换行回执: {r.get('commandResult')!r}", flush=True)
@@ -3609,6 +3612,7 @@ def c_big_color_open():
     doc = {}
     ok = False
     deadline = time.time() + 150
+    resent = False
     while time.time() < deadline:
         data = _try_hook_dump(timeout=25.0)
         if data is not None:
@@ -3618,9 +3622,17 @@ def c_big_color_open():
             if doc.get("path", "").endswith("taopad-big-color.html"):
                 ok = True
                 break
+            # 44324138369 X15 实锤：60 秒仍未接住=转发被会话毛刺吞
+            # （同场 X14/X19 首跑失败重跑过的环境吞击同型），补发一次
+            # 转发，不改产品口径
+            if not resent and time.time() > deadline - 90:
+                resent = True
+                print("X15: 首次转发未激活，补发一次", flush=True)
+                _forward_open(p)
         time.sleep(3.0)
     assert ok, (f"X15: 30MB 着色档案未在时限内加载/界面无响应: "
-                f"path={(doc or {}).get('path', '')!r} tail={(doc or {}).get('text', '')[-40:]!r}")
+                f"path={(doc or {}).get('path', '')!r} tail={(doc or {}).get('text', '')[-40:]!r} "
+                f"补发={(resent)}")
     assert "bigcolor-probe-920831" in (doc.get("text") or ""), "X15: 大文件正文未进编辑器"
     shot("case-big-color")
     # 复验一次快照仍能回来：着色批次不是把界面拖死后才回执
