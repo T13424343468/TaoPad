@@ -2202,12 +2202,13 @@ public sealed class CodeEditor : Grid
         try
         {
             if (_lang.Id is not ("clike" or "csharp" or "python")) { HideHint(); return; }
-            if (_popup.IsOpen) { HideHint(); return; }     // 补全弹层优先，互斥
             var t = RawText;
             int caret = Math.Min(SelPos, t.Length);
             // 触发时机：刚敲了 ( 或 ,，或提示已开着继续跟随
             char prev = caret > 0 ? t[caret - 1] : '\0';
             bool trigger = prev is '(' or ',' || (prev == ' ' && caret > 1 && t[caret - 2] == ',');
+            if (_popup.IsOpen && trigger) { _popup.IsOpen = false; }   // 敲 (/, 即收补全，参数提示接棒（VS 同款）
+            else if (_popup.IsOpen) { HideHint(); return; }            // 补全弹层优先：未到触发键不抢
             if (!_hintPopup.IsOpen && !trigger) { HideHint(); return; }
 
             if (!ParamHints.TryGetHint(t, caret, _lang.Id, out var name, out var argIdx, out var sig, out var src))

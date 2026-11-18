@@ -1659,6 +1659,19 @@ def c_csharp_completion():
                 typed = True
                 break
             time.sleep(1.0)
+        if not typed:
+            # 44243562687 实锤：迟到重放的 ENTER 在 list. 后塞 \r\n 收掉弹层。
+            # 以退格真键清掉尾随空白——文本变化会让补全弹层按 list. 语境重开
+            for _bk in range(4):
+                t = _hook_doc_safe().get("text") or ""
+                if not (t.endswith("list.") or t.rstrip("\r\n").endswith("list.")):
+                    break   # 尾不是 list. 族，退格只会更糟，交回重试主路
+                send_keys("{BACKSPACE}")
+                time.sleep(0.8)
+                t = _hook_doc_safe().get("text") or ""
+                if t.endswith("list."):
+                    typed = True
+                    break
         if typed:
             break
         print(f"X07: 第{attempt + 1}轮键入未落账/正文尾脏: {doc.get('text', '')[-30:]!r}", flush=True)
@@ -1906,6 +1919,21 @@ def c_param_hint():
             ok = True
             break
         time.sleep(1.5)
+    if not ok:
+        # 44243562687 实锤：补全弹层没被收掉时 ( 的参数提示被互斥压住。
+        # 产品已改「敲 ( 即收补全、提示接棒」；此处再补真实重敲兜底：
+        # 收弹层→退格删掉 (→重敲 (，让提示在补全已关的新现场触发
+        for _r in range(3):
+            send_keys("{ESC}")
+            time.sleep(0.5)
+            send_keys("{BACKSPACE}")
+            time.sleep(0.5)
+            send_keys("+9")
+            time.sleep(1.2)
+            doc = _hook_doc_safe()
+            if "open=True" in (doc.get("hintDebug") or ""):
+                ok = True
+                break
     assert ok, f"参数提示未弹出: {doc.get('hintDebug', '')!r}"
     assert "Math.Abs" in (doc.get("hintDebug") or ""), f"提示非 Math.Abs 签名: {doc.get('hintDebug')!r}"
     shot("case-param-hint")
