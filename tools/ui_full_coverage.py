@@ -566,8 +566,16 @@ def worker_main(argv):
                             names.append(t)
                 except Exception:
                     continue
-            if not names and raw_names:
-                names = raw_names
+            # v46v：rawwalk 一并合并——44719994570 实锤 UIA descendants 通道
+            # 全是系统窗口名（Default IME/MSCTFIME UI/PopupHost），rawwalk 的
+            # 15 个命名节点（等价真人所见）被「names 非空」挡在门外；
+            # 系统垃圾名过滤后再断言
+            _junk = {"Default IME", "MSCTFIME UI", "PopupHost", "DefaultIME"}
+            for t in (raw_names or []):
+                if t and t not in _seen and t not in _junk:
+                    _seen.add(t)
+                    names.append(t)
+            names = [t for t in names if t not in _junk]
             if not names:
                 # v20 空读诊断：顶层窗口普查 + 主窗原始后代计数——定位死树范围
                 try:
