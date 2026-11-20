@@ -3295,6 +3295,13 @@ def c_settings():
     menu_xy("工具", "设置…", keep_open=True)   # v36：对话框开着才能收键
     time.sleep(1.3)
     shot("case-settings-dialog")
+    # 云真机批次（2026-11-20）：设置弹窗「数据位置」展示断言——1.0.10 功能
+    # 标签行 + TaoPaths.Root 路径行均应可读（路径恒含 TaoPad：D 盘或回退目录）
+    dl_texts = worker_texts()
+    dl_ok = any("数据位置" in t for t in dl_texts) and any("TaoPad" in t for t in dl_texts)
+    if not dl_ok:
+        shot("case-settings-datalocation-miss")   # 证据留痕：采到什么、缺什么
+    assert dl_ok, f"设置弹窗未采到「数据位置」展示（read_texts={dl_texts[:8]}）"
     send_keys("{SPACE}")     # 焦点默认落在第一个开关（自动换行），空格切换
     time.sleep(0.4)
     send_keys("{TAB}")

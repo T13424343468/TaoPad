@@ -407,7 +407,9 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             // v46j（老板令「快点落地能用」2026-11-18）：超大档案不做全量着色——
             // X15 四班实锤：30MB 着色档案的着色批次把界面线程拖到分钟级，快照
             // 回不来=界面冻死。阈值以上按纯文本开，先回来能用；着色只服务小档案。
-            doc.Editor.SyntaxLanguage = text.Length > 2_000_000 ? null : LangDef.FromFileName(path);
+            // 零警告批（2026-11-20）：超大档案按纯文本开——直接落 Plain（与 setter 的
+            // null 归一语义一致），消除 CS8625/CS8601 与后续 CS8604 流态污染
+            doc.Editor.SyntaxLanguage = text.Length > 2_000_000 ? LangDef.Plain : LangDef.FromFileName(path);
             doc.Eol = DetectEol(text);
             // v39.2（老板令）：撤 2MB 只读护栏——大文件可编辑可保存；
             // 50MB 打开硬上限保留（渲染内存安全线）。
@@ -791,7 +793,7 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             var langByExt = AntPad.Syntax.LangDef.FromFileName(path);
             if (doc.Editor.Text.Length > 2_000_000)
             {
-                doc.Editor.SyntaxLanguage = null;
+                doc.Editor.SyntaxLanguage = LangDef.Plain;   // 与 setter null 归一语义一致（零警告批）
             }
             else if (!ReferenceEquals(doc.Editor.SyntaxLanguage, langByExt))
             {

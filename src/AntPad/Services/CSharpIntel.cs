@@ -129,7 +129,7 @@ public static class CSharpIntel
             {
                 if (m is IMethodSymbol { MethodKind: MethodKind.Constructor or MethodKind.StaticConstructor }) continue;
                 if (m.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Protected or Accessibility.ProtectedOrInternal)) continue;
-                if (m.IsStatic && t == type && type.TypeKind is not TypeKind.Enum) continue;
+                if (m.IsStatic && SymbolEqualityComparer.Default.Equals(t, type) && type.TypeKind is not TypeKind.Enum) continue;   // RS1024：符号比较用 SymbolEqualityComparer
                 if (!seen.Add(m.Name)) continue;
                 yield return new(m.Name, KindOf(m));
             }

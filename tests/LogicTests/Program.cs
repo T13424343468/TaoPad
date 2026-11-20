@@ -15,18 +15,6 @@ void Check(string name, bool ok, string detail = "")
     else { fail++; Console.WriteLine($"FAIL {name} {detail}"); }
 }
 
-bool HasTok(List<TokenSpan> toks, TokKind kind, string? text = null)
-{
-    foreach (var t in toks)
-    {
-        if (t.Kind != kind) continue;
-        if (text == null) return true;
-        // 调用方用整篇坐标分词时直接比对子串
-        return true;
-    }
-    return false;
-}
-
 List<TokKind> KindsOf(LangDef lang, string line)
 {
     var st = new HlState();
