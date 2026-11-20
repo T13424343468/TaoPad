@@ -145,6 +145,32 @@ def bridge_windows(h):
     return ws
 
 
+def pid_top_windows(h):
+    """v31：ContentDialog/Popup 挂在进程内独立【顶层】hwnd（owned window），
+    主窗与 DesktopChildSiteBridge 子桥（EnumChildWindows 只扫子窗）都够不到
+    ——44691178591 T02 实锤：设置弹窗开着，read_texts 只采到主窗三个窗口名。
+    按 pid 普查进程全部顶层窗口，供采数端补通道。"""
+    out = []
+    try:
+        import win32gui
+        import win32process
+
+        target = win32process.GetWindowThreadProcessId(int(h))[1]
+
+        def cb(hc, _):
+            try:
+                if hc != int(h) and win32process.GetWindowThreadProcessId(hc)[1] == target:
+                    out.append(hc)
+            except Exception:
+                pass
+            return 1
+
+        win32gui.EnumWindows(cb, 0)
+    except Exception as e:
+        print("PIDTOPS ERR", type(e).__name__, flush=True)
+    return out[:20]
+
+
 def rawwalk_texts(h):
     """v24：RawView 直穿——ControlView 下 WinUI3 主窗正文对 pywinauto 全盲
     （43580989437/43582362285 两班实锤：子窗桥通道菜单可达、正文文本仍空）。
@@ -173,7 +199,30 @@ def rawwalk_texts(h):
             _EnumChildWindows.argtypes = (_wt.HWND, _cb, _wt.LPARAM)
             _EnumChildWindows(_wt.HWND(h), cb_inst, 0)
             handles.extend(kids[:20])
-            print("RAWWALK2", f"children={len(kids)}", flush=True)
+            # v31：ContentDialog/Popup 是进程内独立顶层 hwnd，EnumChildWindows
+            # 扫不到——按 pid 普查顶层窗口一并当根进树（T02 数据位置断言通道）
+            _wpidbuf = _wt.DWORD()
+            ctypes.windll.user32.GetWindowThreadProcessId(_wt.HWND(h), ctypes.byref(_wpidbuf))
+            _own = _wpidbuf.value
+            _tops = []
+
+            def _enum_top(hw, _lp):
+                _tops.append(hw)
+                return 1
+
+            _cbt = _cb(_enum_top)
+            _EnumWindows = ctypes.windll.user32.EnumWindows
+            _EnumWindows.argtypes = (_cb, _wt.LPARAM)
+            _EnumWindows(_cbt, 0)
+            for _hc in _tops:
+                if _hc == int(h):
+                    continue
+                _pbuf = _wt.DWORD()
+                ctypes.windll.user32.GetWindowThreadProcessId(_wt.HWND(_hc), ctypes.byref(_pbuf))
+                if _pbuf.value == _own:
+                    handles.append(_hc)
+            handles = handles[:40]
+            print("RAWWALK2", f"children={len(kids)}, tops+={len(handles)-len(kids)-1}", flush=True)
         except Exception as _e:
             print("RAWWALK2 child-enum ERR", type(_e).__name__, _e, flush=True)
         # v29：手爬两连盲（nodes=4 / 桌面根 nodes=1 实锤）——改 UIA 原生检索：
@@ -453,10 +502,18 @@ def worker_main(argv):
         # 多通道：句柄连接失败或读空时，按标题重找窗口再试；
         # v23：补 DesktopChildSiteBridge 子窗通道（正文 UIA 挂在桥上，43580989437 实锤）
         sources = [w for w in (win,) if w is not None] + bridge_windows(h) + [None]
-        raw_names = rawwalk_texts(h)   # v24：RawView 直穿兜底
+        # v31：ContentDialog/Popup 挂进程内独立顶层 hwnd——主窗与子桥通道都不达
+        # （44691178591 T02 实锤：设置弹窗开着只采到三个窗口名），补顶层窗口源
+        _top_srcs = []
+        for _hc in pid_top_windows(h):
+            try:
+                _top_srcs.append(Desktop(backend="uia").window(handle=_hc, visible_only=False))
+            except Exception:
+                continue
+        raw_names = rawwalk_texts(h)   # v24：RawView 直穿兜底（v31 起内部已含顶层窗口根）
         if mode == "read_texts":
             names = []
-            for w in sources:
+            for w in list(sources) + _top_srcs:
                 if w is not None:
                     try:
                         names = [d.window_text() for d in w.descendants(control_type="Text")
