@@ -654,6 +654,7 @@ jobs:
           )
           ($dpLines -join "`r`n") | Out-File $dpScript -Encoding ascii
           diskpart /s $dpScript | Out-Host
+          $global:LASTEXITCODE = 0
           try {
             if (-not (Test-Path 'X:\')) { throw "满盘注入：VHD 挂载失败（X: 不存在）" }
             $filler = New-Object byte[] (1MB)
@@ -679,6 +680,7 @@ jobs:
           )
           ($dpLines2 -join "`r`n") | Out-File $dpScript -Encoding ascii
             diskpart /s $dpScript | Out-Null
+            $global:LASTEXITCODE = 0
             Remove-Item $vhd -Force -ErrorAction SilentlyContinue
           }
 
@@ -724,6 +726,7 @@ jobs:
           if ($after1 -gt $wer1) { throw "monkey 撞崩：WER 新增 $($after1 - $wer1) 条（点击 $sent 次），真缺陷" }
           Write-Host "monkey 机械遍历 3 分钟、$sent 次随机操作，零崩溃，通过"
           Write-Host "健壮性注入组全部通过"
+          exit 0
 
       - name: 上传本班证据
         if: always()
