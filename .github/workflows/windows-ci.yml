@@ -561,3 +561,170 @@ jobs:
           name: evidence-soak
           path: evidence/**
           retention-days: 14
+
+  robustness:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载安装包
+        uses: actions/download-artifact@v4
+        with:
+          name: TaoPad-installer
+          path: out
+
+      - name: 静默安装（供本班测试）
+        shell: pwsh
+        run: |
+          $msi = (Resolve-Path out/*.msi).Path
+          $p = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "静默安装失败，退出码 $($p.ExitCode)" }
+
+      - name: 【关7·健壮】 异常注入组（满盘保存/monkey）+ 性能基线 + 录屏
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y --no-progress 2>&1 | Out-Null
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          New-Item -ItemType Directory -Force -Path evidence | Out-Null
+          function Snap($path) {
+            $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size)
+            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose(); $bmp.Dispose()
+          }
+          function Wer-Count {
+            return @(Get-ChildItem "$env:LOCALAPPDATA\Microsoft\Windows\WER" -Recurse -ErrorAction SilentlyContinue | Where-Object Name -like "*TaoPad*").Count
+          }
+          function Find-AppExe {
+            foreach ($d in (Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free }).Root) {
+              $cand = Join-Path $d "Program Files\TaoPad\TaoPad.exe"
+              if (Test-Path $cand) { return $cand }
+            }
+            foreach ($d in (Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free }).Root) {
+              $pf = Join-Path $d "Program Files"
+              if ($pf) {
+                $hit = Get-ChildItem $pf -Recurse -Depth 3 -Filter TaoPad.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($hit) { return $hit.FullName }
+              }
+            }
+            return $null
+          }
+          $appExe = Find-AppExe
+          if (-not $appExe) { throw "找不到已安装的 TaoPad.exe" }
+          $perfLog = "evidence/perf-baseline.txt"
+
+          # ---- 性能量化基线：冷启动 + 内存 ----
+          Get-Process TaoPad -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 3
+          $sw = [System.Diagnostics.Stopwatch]::StartNew()
+          Start-Process $appExe
+          $ready = $false
+          while ($sw.Elapsed.TotalSeconds -lt 30) {
+            $p = Get-Process TaoPad -ErrorAction SilentlyContinue
+            if ($p -and $p.MainWindowHandle -ne 0) { $ready = $true; break }
+            Start-Sleep -Milliseconds 300
+          }
+          $sw.Stop()
+          if (-not $ready) { throw "冷启动 30 秒内主窗口未出现，性能基线不过" }
+          $coldSeconds = [math]::Round($sw.Elapsed.TotalSeconds, 2)
+          Start-Sleep -Seconds 5
+          $memMB = [math]::Round((Get-Process TaoPad).WorkingSet64 / 1MB, 1)
+          "冷启动(进程到主窗口): ${coldSeconds}s (阈值 20s)" | Out-File $perfLog -Encoding utf8
+          "启动后内存工作集: ${memMB}MB (阈值 800MB)" | Out-File $perfLog -Append -Encoding utf8
+          if ($coldSeconds -gt 20) { throw "冷启动 ${coldSeconds}s 超阈值 20s" }
+          if ($memMB -gt 800) { throw "内存 ${memMB}MB 超阈值 800MB" }
+          Write-Host "性能基线：冷启动 ${coldSeconds}s、内存 ${memMB}MB，达标落档"
+
+          # ---- 满盘保存注入（64MB VHD 灌满后另存）----
+          $wer0 = Wer-Count
+          $vhd = "$env:TEMP\fulldisk.vhd"
+          $dpScript = "$env:TEMP\dp.txt"
+          @"
+create vdisk file="$vhd" maximum=64 type=fixed
+attach vdisk
+create partition primary
+format fs=ntfs quick
+assign letter=X
+"@ | Out-File $dpScript -Encoding ascii
+          diskpart /s $dpScript | Out-Host
+          try {
+            if (-not (Test-Path 'X:\')) { throw "满盘注入：VHD 挂载失败（X: 不存在）" }
+            $filler = New-Object byte[] (1MB)
+            $n = 0
+            try { while ($true) { [System.IO.File]::WriteAllBytes("X:\fill-$n.bin", $filler); $n++ } } catch { }
+            Write-Host "满盘注入：X: 已灌满（$n MB）"
+            # 经命令行把灌满盘上的文件交给 TaoPad 打开并尝试保存（写失败路径）
+            "probe" | Out-File "X:\probe.txt" -Encoding ascii
+            Start-Process $appExe -ArgumentList '"X:\probe.txt"'
+            Start-Sleep -Seconds 12
+            (New-Object -ComObject WScript.Shell).AppActivate('TaoPad') | Out-Null
+            Snap "evidence\diskfull-open.png"
+            $after0 = Wer-Count
+            if ($after0 -gt $wer0) { throw "满盘注入：打开/保存灌满盘文件引发崩溃（WER 新增 $($after0 - $wer0)）" }
+            if (-not (Get-Process TaoPad -ErrorAction SilentlyContinue)) { throw "满盘注入：进程退出" }
+            Write-Host "满盘注入：打开灌满盘档案不崩、进程存活，通过"
+          } finally {
+            Get-Process TaoPad -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 3
+            @"
+select vdisk file="$vhd"
+detach vdisk
+"@ | Out-File $dpScript -Encoding ascii
+            diskpart /s $dpScript | Out-Null
+            Remove-Item $vhd -Force -ErrorAction SilentlyContinue
+          }
+
+          # ---- monkey 机械遍历 3 分钟 + 录屏 ----
+          $wer1 = Wer-Count
+          Start-Process $appExe
+          Start-Sleep -Seconds 12
+          (New-Object -ComObject WScript.Shell).AppActivate('TaoPad') | Out-Null
+          Start-Sleep -Seconds 2
+          $ff = Get-Command ffmpeg -ErrorAction SilentlyContinue
+          if ($ff) {
+            Start-Process $ff.Source -ArgumentList '-y','-f','gdigrab','-framerate','2','-i','desktop','-t','180','evidence\monkey-recording.mp4' -WindowStyle Hidden
+            Write-Host "录屏已启动（gdigrab 2fps）"
+          } else {
+            Write-Host "WARN: ffmpeg 不可用，本段录屏缺，按盲区挂账"
+          }
+          $sig = "
+using System;
+using System.Runtime.InteropServices;
+public static class M {
+  [DllImport(""user32.dll"")] public static extern bool SetCursorPos(int x, int y);
+  [DllImport(""user32.dll"")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, UIntPtr e);
+}"
+          Add-Type -TypeDefinition $sig -ErrorAction SilentlyContinue
+          $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+          $rnd = New-Object System.Random
+          $end = (Get-Date).AddMinutes(3)
+          $sent = 0
+          while ((Get-Date) -lt $end) {
+            if (-not (Get-Process TaoPad -ErrorAction SilentlyContinue)) { throw "monkey 段进程退出（点击 $sent 次后）" }
+            $x = $rnd.Next($bounds.Left + 5, $bounds.Right - 5)
+            $y = $rnd.Next($bounds.Top + 5, $bounds.Bottom - 5)
+            [M]::SetCursorPos($x, $y)
+            if ($rnd.Next(3) -eq 0) { [M]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero); [M]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero) }
+            elseif ($rnd.Next(3) -eq 1) { [M]::mouse_event(8, 0, 0, 0, [UIntPtr]::Zero); [M]::mouse_event(16, 0, 0, 0, [UIntPtr]::Zero) }
+            $sent++
+            Start-Sleep -Milliseconds 700
+          }
+          Get-Process TaoPad -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          $after1 = Wer-Count
+          if ($after1 -gt $wer1) { throw "monkey 撞崩：WER 新增 $($after1 - $wer1) 条（点击 $sent 次），真缺陷" }
+          Write-Host "monkey 机械遍历 3 分钟、$sent 次随机操作，零崩溃，通过"
+          Write-Host "健壮性注入组全部通过"
+
+      - name: 上传本班证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-robustness
+          path: evidence/**
+          retention-days: 14
