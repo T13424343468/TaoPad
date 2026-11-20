@@ -587,16 +587,12 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             new TextBlock { Text = "主题" },
             theme,
             // 数据位置展示（1.0.10）：真机用户可直接核验 D 盘落地情况；
-            // 文字可选中，拖选即可复制路径
-            new TextBlock { Text = "数据位置（配置与日志保存在此目录下）" },
-            new TextBlock
-            {
-                Text = TaoPaths.Root,
-                TextWrapping = TextWrapping.Wrap,
-                IsTextSelectionEnabled = true,
-                FontSize = 12,
-                Opacity = 0.8,
-            },
+            // 文字可选中，拖选即可复制路径。
+            // 44700118321 T02 实锤：ContentDialog 弹层内 TextBlock 的 UIA 树
+            // 不随 Text 上名（采数端只读到 PopupHost），显式补自动化名
+            // （与 ExposeMenuToUia 同法），读屏与自动化采数共用。
+            MakeDataLocLabel(),
+            MakeDataLocPathBlock(),
         } };
         wrap.Header = "自动换行";
         lineNo.Header = "显示行号";
@@ -635,6 +631,30 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             CrashLog.Report(ex, "菜单「设置」");
             InfoTip($"设置打开出错，已拦截：{ex.Message}");
         }
+    }
+
+    // 数据位置两行（1.0.10 展示 + 44700118321 T02 自动化名）：
+    // ContentDialog 弹层内 TextBlock 的 UIA 树不随 Text 上名，显式补
+    // AutomationProperties.Name（与 ExposeMenuToUia 同法），读屏与自动化采数共用
+    private static TextBlock MakeDataLocLabel()
+    {
+        var tb = new TextBlock { Text = "数据位置（配置与日志保存在此目录下）" };
+        AutomationProperties.SetName(tb, tb.Text);
+        return tb;
+    }
+
+    private static TextBlock MakeDataLocPathBlock()
+    {
+        var tb = new TextBlock
+        {
+            Text = TaoPaths.Root,
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+            FontSize = 12,
+            Opacity = 0.8,
+        };
+        AutomationProperties.SetName(tb, TaoPaths.Root);
+        return tb;
     }
 
     async void OnExportPrintableHtml(object sender, RoutedEventArgs e)
