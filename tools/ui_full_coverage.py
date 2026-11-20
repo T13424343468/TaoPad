@@ -171,6 +171,31 @@ def pid_top_windows(h):
     return out[:20]
 
 
+def top_bridge_children(h):
+    """v33：弹窗顶层 hwnd 的 XAML 正文挂其 DesktopChildSiteBridge 子 hwnd
+    （与主窗 v23 同构）——44706673392 T02 实锤：产品侧补自动化名后，
+    弹窗顶层 UIA 树仍只有 PopupHost 根+IME 伪窗口，正文整块盲；
+    顶层普查（v31）只收顶层本身，从未枚举弹窗顶层的子窗桥。"""
+    out = []
+    try:
+        import win32gui
+        for ht in pid_top_windows(h):
+            def cb(hc, _):
+                try:
+                    cls = win32gui.GetClassName(hc)
+                    if 'Bridge' in cls or 'DesktopChildSite' in cls:
+                        out.append(hc)
+                except Exception:
+                    pass
+            try:
+                win32gui.EnumChildWindows(ht, cb, None)
+            except Exception:
+                pass
+    except Exception as e:
+        print("TOPBRIDGE ERR", type(e).__name__, flush=True)
+    return out[:10]
+
+
 def rawwalk_texts(h):
     """v24：RawView 直穿——ControlView 下 WinUI3 主窗正文对 pywinauto 全盲
     （43580989437/43582362285 两班实锤：子窗桥通道菜单可达、正文文本仍空）。
@@ -221,8 +246,18 @@ def rawwalk_texts(h):
                 ctypes.windll.user32.GetWindowThreadProcessId(_wt.HWND(_hc), ctypes.byref(_pbuf))
                 if _pbuf.value == _own:
                     handles.append(_hc)
-            handles = handles[:40]
-            print("RAWWALK2", f"children={len(kids)}, tops+={len(handles)-len(kids)-1}", flush=True)
+                    # v33：弹窗顶层正文挂其 DesktopChildSiteBridge 子 hwnd
+                    # （44706673392 实锤顶层根下零子节点），一并进树
+                    _tkids = []
+
+                    def _enum_topkid(hk, _lp):
+                        _tkids.append(hk)
+                        return 1
+
+                    _EnumChildWindows(_wt.HWND(_hc), _cb(_enum_topkid), 0)
+                    handles.extend(_tkids[:6])
+            handles = handles[:60]
+            print("RAWWALK2", f"children={len(kids)}, tops+bridges={len(handles)-len(kids)-1}", flush=True)
         except Exception as _e:
             print("RAWWALK2 child-enum ERR", type(_e).__name__, _e, flush=True)
         # v29：手爬两连盲（nodes=4 / 桌面根 nodes=1 实锤）——改 UIA 原生检索：
@@ -503,9 +538,11 @@ def worker_main(argv):
         # v23：补 DesktopChildSiteBridge 子窗通道（正文 UIA 挂在桥上，43580989437 实锤）
         sources = [w for w in (win,) if w is not None] + bridge_windows(h) + [None]
         # v31：ContentDialog/Popup 挂进程内独立顶层 hwnd——主窗与子桥通道都不达
-        # （44691178591 T02 实锤：设置弹窗开着只采到三个窗口名），补顶层窗口源
+        # （44691178591 T02 实锤：设置弹窗开着只采到三个窗口名），补顶层窗口源；
+        # v33：弹窗顶层的正文挂其 DesktopChildSiteBridge 子 hwnd（44706673392
+        # 实锤顶层根下无正文），子窗桥一并作源
         _top_srcs = []
-        for _hc in pid_top_windows(h):
+        for _hc in pid_top_windows(h) + top_bridge_children(h):
             try:
                 _top_srcs.append(Desktop(backend="uia").window(handle=_hc, visible_only=False))
             except Exception:
