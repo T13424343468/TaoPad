@@ -645,13 +645,14 @@ jobs:
           $wer0 = Wer-Count
           $vhd = "$env:TEMP\fulldisk.vhd"
           $dpScript = "$env:TEMP\dp.txt"
-          @"
-create vdisk file="$vhd" maximum=64 type=fixed
-attach vdisk
-create partition primary
-format fs=ntfs quick
-assign letter=X
-"@ | Out-File $dpScript -Encoding ascii
+          $dpLines = @(
+            "create vdisk file=\"$vhd\" maximum=64 type=fixed",
+            "attach vdisk",
+            "create partition primary",
+            "format fs=ntfs quick",
+            "assign letter=X"
+          )
+          ($dpLines -join "\r\n") | Out-File $dpScript -Encoding ascii
           diskpart /s $dpScript | Out-Host
           try {
             if (-not (Test-Path 'X:\')) { throw "满盘注入：VHD 挂载失败（X: 不存在）" }
@@ -672,10 +673,11 @@ assign letter=X
           } finally {
             Get-Process TaoPad -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
             Start-Sleep -Seconds 3
-            @"
-select vdisk file="$vhd"
-detach vdisk
-"@ | Out-File $dpScript -Encoding ascii
+                      $dpLines2 = @(
+            "select vdisk file=\"$vhd\"",
+            "detach vdisk"
+          )
+          ($dpLines2 -join "\r\n") | Out-File $dpScript -Encoding ascii
             diskpart /s $dpScript | Out-Null
             Remove-Item $vhd -Force -ErrorAction SilentlyContinue
           }
@@ -693,13 +695,15 @@ detach vdisk
           } else {
             Write-Host "WARN: ffmpeg 不可用，本段录屏缺，按盲区挂账"
           }
-          $sig = "
-using System;
-using System.Runtime.InteropServices;
-public static class M {
-  [DllImport(""user32.dll"")] public static extern bool SetCursorPos(int x, int y);
-  [DllImport(""user32.dll"")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, UIntPtr e);
-}"
+          $sigLines = @(
+            "using System;",
+            "using System.Runtime.InteropServices;",
+            "public static class M {",
+            "  [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x, int y);",
+            "  [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, UIntPtr e);",
+            "}"
+          )
+          $sig = $sigLines -join "\r\n"
           Add-Type -TypeDefinition $sig -ErrorAction SilentlyContinue
           $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
           $rnd = New-Object System.Random
