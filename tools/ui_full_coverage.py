@@ -549,25 +549,23 @@ def worker_main(argv):
                 continue
         raw_names = rawwalk_texts(h)   # v24：RawView 直穿兜底（v31 起内部已含顶层窗口根）
         if mode == "read_texts":
+            # v46t：改全源合并——44714553766 实锤「读到非空即 break」让主窗的
+            # IME 窗口名（Default IME/MSCTFIME UI）抢先收工，弹窗顶层源永远轮不到
             names = []
+            _seen = set()
             for w in list(sources) + _top_srcs:
-                if w is not None:
-                    try:
-                        names = [d.window_text() for d in w.descendants(control_type="Text")
-                                 if (d.window_text() or "").strip()]
-                        if names:
-                            break
-                    except Exception:
-                        names = []
-                alt = by_title()
-                if alt is not None:
-                    try:
-                        names = [d.window_text() for d in alt.descendants(control_type="Text")
-                                 if (d.window_text() or "").strip()]
-                        if names:
-                            break
-                    except Exception:
-                        names = []
+                if w is None:
+                    w = by_title()
+                    if w is None:
+                        continue
+                try:
+                    for d in w.descendants(control_type="Text"):
+                        t = (d.window_text() or "").strip()
+                        if t and t not in _seen:
+                            _seen.add(t)
+                            names.append(t)
+                except Exception:
+                    continue
             if not names and raw_names:
                 names = raw_names
             if not names:
