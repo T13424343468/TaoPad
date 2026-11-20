@@ -3735,16 +3735,20 @@ def c_big_color_open():
             docs = data.get("docs") or []
             act = data.get("active", -1)
             doc = docs[act] if 0 <= act < len(docs) else (docs[-1] if docs else {})
-            if doc.get("path", "").endswith("taopad-big-color.html"):
+            # 44737489394 X15 实锤：活动档案 path 可为 None（打开竞态下
+            # 键存在值空），.get 第二参只挡键缺失不挡 None——or 兜空串
+            if (doc.get("path") or "").endswith("taopad-big-color.html"):
                 ok = True
                 break
-            # 44324138369 X15 实锤：60 秒仍未接住=转发被会话毛刺吞
-            # （同场 X14/X19 首跑失败重跑过的环境吞击同型），补发一次
-            # 转发，不改产品口径
-            if not resent and time.time() > deadline - 90:
-                resent = True
-                print("X15: 首次转发未激活，补发一次", flush=True)
-                _forward_open(p)
+        # 44324138369 X15 实锤：60 秒仍未接住=转发被会话毛刺吞
+        # （同场 X14/X19 首跑失败重跑过的环境吞击同型），补发一次
+        # 转发，不改产品口径。
+        # 44737489394 重跑实锤：30MB 加载占住 UI 线程时快照通道整段
+        # 无应答，补发原挂在 data 非空之下永不触发——改为到点必补发
+        if not resent and time.time() > deadline - 90:
+            resent = True
+            print("X15: 首次转发未激活，补发一次", flush=True)
+            _forward_open(p)
         time.sleep(3.0)
     assert ok, (f"X15: 30MB 着色档案未在时限内加载/界面无响应: "
                 f"path={(doc or {}).get('path', '')!r} tail={(doc or {}).get('text', '')[-40:]!r} "
