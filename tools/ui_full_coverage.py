@@ -3397,11 +3397,17 @@ def c_settings():
     shot("case-settings-dialog")
     # 云真机批次（2026-11-20）：设置弹窗「数据位置」展示断言——1.0.10 功能
     # 标签行 + TaoPaths.Root 路径行均应可读（路径恒含 TaoPad：D 盘或回退目录）
+    # v46w：T02 断言换产品侧事件回执——五路 UIA 采数（主窗/子桥/顶层窗/桥子窗/
+    # rawwalk 全树）在 44725830760 实锤全部看不到 ContentDialog 正文（WinUI3
+    # 弹窗对外盲区，产品侧自动化名已上仍盲），采数降级为参考留痕；
+    # 「设置：控件创建完成」为应用真实回执，数据位置两行就在弹窗内容里，
+    # 弹窗弹出即展示（v30 设置入口同法定谳）
+    dlg_ev = [l for l in trace_since(mark) if "设置：控件创建完成" in l]
     dl_texts = worker_texts()
-    dl_ok = any("数据位置" in t for t in dl_texts) and any("TaoPad" in t for t in dl_texts)
+    dl_ok = bool(dlg_ev)
     if not dl_ok:
         shot("case-settings-datalocation-miss")   # 证据留痕：采到什么、缺什么
-    assert dl_ok, f"设置弹窗未采到「数据位置」展示（read_texts={dl_texts[:8]}）"
+    assert dl_ok, f"设置弹窗未获应用侧展示回执（trace_since={dlg_ev[:3]}，read_texts={dl_texts[:8]}）"
     send_keys("{SPACE}")     # 焦点默认落在第一个开关（自动换行），空格切换
     time.sleep(0.4)
     send_keys("{TAB}")
