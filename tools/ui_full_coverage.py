@@ -1592,7 +1592,11 @@ def c_testhook_dump():
     send_keys("^a{DEL}")
     type_text("X03HOOK-正文自报-987654321")
     data = hook_dump()
-    assert data.get("version") == "1.1.1", f"版本不符: {data.get('version')!r}"
+    # 版本断言动态取自源码 AppVersion (run 44903936270 实锤: 写死 1.1.1 在升版后必炸)
+    _src = open(os.path.join(os.path.dirname(__file__), '..', 'src', 'AntPad', 'MainWindow.xaml.cs'),
+                encoding='utf-8-sig').read()
+    _app_ver = re.search(r'AppVersion\s*=\s*"([\d.]+)"', _src).group(1)
+    assert data.get("version") == _app_ver, f"版本不符: {data.get('version')!r} != 源码 {_app_ver!r}"
     docs = data.get("docs") or []
     assert docs, "导出快照里没有文档"
     active = data.get("active", -1)
