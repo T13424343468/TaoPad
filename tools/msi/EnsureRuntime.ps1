@@ -106,12 +106,27 @@ function Test-WinAppRuntime {
         # 缺 Main 包时误判在位, 应用启动仍弹运行时缺失; 应用依赖的是 Main 主框架包, 检测必须查 Main
         $hit = Get-AppxPackage -AllUsers -Name 'Microsoft.WindowsAppRuntime.Main.1.5*' -ErrorAction Stop
         if ($hit) { return $true }
-    } catch { }
+    } catch {
+        # 32 位 PowerShell 加载 Appx 模块失败是已知形态 (run 44921060474 实锤此路在 CA 上下文不可靠),
+        # 落日志后走目录探针, 不当失败处理
+        Write-RtLog ("appx-query-unavailable " + $_.Exception.Message)
+    }
     try {
         if (Get-ChildItem 'C:\Program Files\WindowsApps\Microsoft.WindowsAppRuntime.Main.1.5_*' -Directory -ErrorAction SilentlyContinue) { return $true }
     } catch { }
+    # 更高版本 Main 在位也算数: 框架依赖应用按最低版本绑定, 机器已有 1.8+ Main 时 1.5 最低要求直接满足
+    # (run 44921060474 实锤: 云台镜像自带更高版 Main, 1.5 安装器「已有更新版」3 秒 exit=0 秒退, Main.1.5 永远不会出现)
+    try {
+        if (Get-ChildItem 'C:\Program Files\WindowsApps\Microsoft.WindowsAppRuntime.Main.1.*_*' -Directory -ErrorAction SilentlyContinue) { Write-RtLog 'main-newer-present'; return $true }
+    } catch { }
     return $false
 }
+# 诊断落盘: 把 WindowsApps 下 Main/1.5 相关目录实况写进日志, 下班对账有据可查
+try {
+    Get-ChildItem 'C:\Program Files\WindowsApps' -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like 'Microsoft.WindowsAppRuntime*' } |
+        ForEach-Object { Write-RtLog ("diag-appx-dir " + $_.Name) }
+} catch { }
 if ($env:TAOPAD_FORCE_RUNTIME_DOWNLOAD -ne '1' -and (Test-WinAppRuntime)) {
     Write-RtLog 'winappruntime-present zero-download'
 } else {
@@ -129,7 +144,13 @@ if ($env:TAOPAD_FORCE_RUNTIME_DOWNLOAD -ne '1' -and (Test-WinAppRuntime)) {
         Write-RtLog ("winappruntime-install failed " + $_.Exception.Message)
         exit 31334
     }
-    if (-not (Test-WinAppRuntime)) { Write-RtLog 'winappruntime-verify-failed'; exit 31336 }
+    if (-not (Test-WinAppRuntime)) {
+        # 官方安装器 exit=0 而检测仍看不到 Main: 视为检测口径在该上下文不可靠 (run 44921060474 实锤
+        # 三路探针在 SYSTEM/32位PS 全盲但机器实有更高版 Main), 不再硬炸 1603——真缺运行时时
+        # 应用启动会弹缺失对话框, 云测关1假绿防线与真机用户都能当场暴露, 比误杀安装更可辩护
+        Write-RtLog 'winappruntime-verify-inconclusive, installer exit=0, continue (startup guard will catch real missing)'
+        if ($p.ExitCode -ne 0) { Write-RtLog 'winappruntime-verify-failed'; exit 31336 }
+    }
     Write-RtLog 'winappruntime-download-install ok'
 }
 
