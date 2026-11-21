@@ -133,6 +133,10 @@ jobs:
           Write-Host "安装位置: $appExe"
           Start-Process $appExe
           Start-Sleep -Seconds 15
+          # 假绿防线 (TaoDown run 44902582756 实锤同型坑): 运行时缺失时应用弹错误对话框, 进程仍活着, 只查进程会假绿
+          Start-Sleep -Seconds 3
+          $errDlg = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Children, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, "TaoPad.exe - This application could not be started")))
+          if ($errDlg) { throw "启动错误对话框: Windows App Runtime 缺失 (见截图)" }
           if (-not (Get-Process TaoPad -ErrorAction SilentlyContinue)) { throw "启动后进程不在运行" }
           Snap "evidence\user-launch-1.png"
           Start-Sleep -Seconds 10
