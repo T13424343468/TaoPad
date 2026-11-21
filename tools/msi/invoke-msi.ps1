@@ -14,8 +14,8 @@ $p = Start-Process msiexec.exe -ArgumentList $MsiArgs -PassThru
 if (-not $p.WaitForExit($TimeoutSec * 1000)) {
     Write-Host "==== msiexec 超过 $TimeoutSec 秒未退出, 视为挂起, 抓取日志尾部 ===="
     if (Test-Path $LogPath) {
-        Write-Host "---- $LogPath 尾部 100 行 ----"
-        Get-Content $LogPath -Tail 100
+        Write-Host "---- $LogPath 尾部 300 行 ----"
+        Get-Content $LogPath -Tail 300
     } else {
         Write-Host "安装日志不存在: $LogPath"
     }
@@ -27,8 +27,8 @@ $code = $p.ExitCode
 Write-Host "msiexec exit=$code"
 if ($code -notin 0, 3010) {
     if (Test-Path $LogPath) {
-        Write-Host "---- $LogPath 尾部 100 行 ----"
-        Get-Content $LogPath -Tail 100
+        Write-Host "---- $LogPath 尾部 300 行 ----"
+        Get-Content $LogPath -Tail 300
     }
     # 运行时保障日志 (机器级固定路径): 自定义动作成败的第一手证据, 失败时一并落盘
     $rtLog = Join-Path $env:ProgramData 'TaoPad\taopad-runtime.log'
