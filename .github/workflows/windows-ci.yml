@@ -861,7 +861,11 @@ jobs:
           ./tools/msi/invoke-msi.ps1 -MsiArgs "/i `"$msi`" /qn /norestart /l*v out\reinstall.log" -LogPath out\reinstall.log
           $unins = Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall' |
                    Where-Object { $_.GetValue('DisplayName') -eq 'TaoPad' } | Select-Object -First 1
-          $appExe = Join-Path $unins.GetValue('InstallLocation') 'TaoPad.exe'
+          if (-not $unins) { throw "重装后卸载登记缺失" }
+          # InstallLocation 在重装场景可为空 (run 44903024733 实锤): 为空回退 wxs INSTALLFOLDER 默认目录
+          $appExe = $null
+          if ($unins.GetValue('InstallLocation')) { $appExe = Join-Path $unins.GetValue('InstallLocation') 'TaoPad.exe' }
+          if (-not ($appExe -and (Test-Path $appExe))) { $appExe = 'D:\Program Files\TaoPad\TaoPad.exe' }
           if (-not (Test-Path $appExe)) { throw "重装后安装目录没有 TaoPad.exe: $appExe" }
           Start-Process $appExe
           Start-Sleep -Seconds 15
