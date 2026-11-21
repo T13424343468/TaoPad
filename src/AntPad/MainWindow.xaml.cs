@@ -919,12 +919,11 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
         _recent.RemoveAll(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
         _recent.Insert(0, path);
         if (_recent.Count > 10) _recent.RemoveRange(10, _recent.Count - 10);
-        try
+        Services.Safe.Run(() =>
         {
             Directory.CreateDirectory(Path.GetDirectoryName(RecentFile)!);
             File.WriteAllText(RecentFile, JsonSerializer.Serialize(_recent));
-        }
-        catch { }
+        }, "最近文件落盘");
         UpdateRecentMenu();
     }
 
@@ -1330,7 +1329,7 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
                 VerticalAlignment = VerticalAlignment.Stretch,
                 Width = OutlinePanelWidth,
             };
-            _outline.ItemClicked += line => { try { Ed?.GoToLine(line); } catch { } };
+            _outline.ItemClicked += line => Services.Safe.Run(() => Ed?.GoToLine(line), "大纲条跳转");
             EditorHost.Children.Add(_outline);
         }
         UpdateEditorHost();
@@ -1498,7 +1497,7 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
     void OnCloseTab(object sender, RoutedEventArgs e) { if (Active is { } d) _ = CloseDocAsync(d); }
     void OnExit(object sender, RoutedEventArgs e)
     {
-        try { Services.TraceLog.Write("菜单「退出」项被点击——本次退出为用户/自动化主动触发"); } catch { }
+        Services.TraceLog.Write("菜单「退出」项被点击——本次退出为用户/自动化主动触发");   // TraceLog 自身绝不抛（台账豁免口径）
         Close();
     }
 
@@ -1686,7 +1685,7 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
         }
         // 切主题刚点过菜单，键盘焦点常滞留在菜单栏——还回编辑器，
         // 否则接着打字没反应、智能提示看起来"失效"
-        try { Active?.Editor.RestoreFocus(); } catch { }
+        Services.Safe.Run(() => Active?.Editor.RestoreFocus(), "焦点归还编辑器");
     }
 
     /// <summary>元素级基调重估：先归默认再落目标，与窗口级同款（v63 手法），
@@ -1792,7 +1791,7 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             // 拖进来的文件按用户习惯开进全新窗口，不打扰当前窗口的标签
             if (paths.Count > 0) OpenInNewWindow(paths);
         }
-        catch { }
+        catch (Exception ex) { Services.Safe.Swallowed("拖放打开", ex); }
     }
 
     /// <summary>开一个全新窗口并载入一批文件（拖放文件进软件时使用）。</summary>
@@ -1819,7 +1818,7 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
         try { dlg.XamlRoot ??= Content.XamlRoot; } catch { return null; }
         if (dlg.XamlRoot is null) return null;
         // 弹窗不归窗口内容树管，基调要显式对齐当前主题，否则深浅色弹窗会与主界面脱节
-        try { dlg.RequestedTheme = ThemeService.BaseElementTheme; } catch { }
+        Services.Safe.Run(() => dlg.RequestedTheme = ThemeService.BaseElementTheme, "弹窗基调对齐");
         _activeDialog = dlg;
         try { return await dlg.ShowAsync(); }
         catch { return null; }

@@ -72,7 +72,7 @@ public static class NativeCrashDump
                     }
                     catch { /* 转储失败有日志就够定位 */ }
                 }
-                catch { }
+                catch (Exception ex) { Safe.Swallowed("崩溃日志落盘", ex); }
                 return (IntPtr)1;   // EXCEPTION_EXECUTE_HANDLER：按系统默认结束
             };
             SetUnhandledExceptionFilter(_filter);

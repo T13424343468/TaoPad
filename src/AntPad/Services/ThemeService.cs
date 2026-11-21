@@ -33,13 +33,11 @@ public static class ThemeService
 
     public static AppTheme LoadChoice()
     {
-        try
+        return Safe.Run(() =>
         {
             var s = File.ReadAllText(ThemeFile).Trim();
-            if (Enum.TryParse<AppTheme>(s, out var t)) return t;
-        }
-        catch { }
-        return AppTheme.Ink;
+            return Enum.TryParse<AppTheme>(s, out var t) ? t : AppTheme.Ink;
+        }, AppTheme.Ink, "主题选择读取");
     }
 
     public static void Apply(AppTheme t)
@@ -158,8 +156,7 @@ public static class ThemeService
         catch (Exception ex) { CrashLog.Report(ex, $"加载主题 {file} 失败"); }
         if (next is null && file != "Ant.Ink")
         {
-            try { next = new ResourceDictionary { Source = new Uri("ms-appx:///Themes/Ant.Ink.xaml") }; }
-            catch { }
+            Safe.Run(() => next = new ResourceDictionary { Source = new Uri("ms-appx:///Themes/Ant.Ink.xaml") }, "水墨回退字典加载");
         }
         if (next is null) return null;
         // 1.0.8 换肤加固：App.xaml 静态合并的水墨字典永远留在合并链里，与运行时字典

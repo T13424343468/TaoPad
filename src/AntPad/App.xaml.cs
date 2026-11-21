@@ -42,11 +42,11 @@ public partial class App : Application
     /// 因此显式退出，外加 1 秒兜底强杀——绝不留残留进程。</summary>
     public static void ExitAll()
     {
-        try { Services.TraceLog.Write("ExitAll 触发：框架退出+1秒兜底强杀"); } catch { }
+        Services.TraceLog.Write("ExitAll 触发：框架退出+1秒兜底强杀");   // TraceLog 自身绝不抛（台账豁免口径）
         try { Current.Exit(); } catch { /* 框架退出失败走兜底 */ }
         _ = System.Threading.Tasks.Task.Run(async () =>
         {
-            try { await System.Threading.Tasks.Task.Delay(1000); } catch { }
+            try { await System.Threading.Tasks.Task.Delay(1000); } catch { /* 退出兜底路径：台账豁免，不能再抛 */ }
             Environment.Exit(0);   // 兜底：框架退不干净就直接结束，防止进程残留
         });
     }
@@ -73,7 +73,7 @@ public partial class App : Application
                         catch { /* 提示失败不影响续命 */ }
                     });
             }
-            catch { }
+            catch { /* 续命兜底：台账豁免——异常处理器内不能再抛 */ }
         };
         // 后台线程兜底：UI 线程的 UnhandledException 管不到这里，
         // 只记日志不退出（进程继续运行，避免后台偶发错误带崩整个程序）

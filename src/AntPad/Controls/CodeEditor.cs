@@ -53,7 +53,7 @@ public sealed class CodeEditor : Grid
     /// （E07「切语言后立即注释」崩溃的头号嫌疑）。</summary>
     void ConvergeRecolor()
     {
-        try { _colorTimer?.Stop(); } catch { }
+        Services.Safe.Run(() => _colorTimer?.Stop(), "着色定时器停止");
         bool pending = _colorPending;
         _colorPending = false;
         if (pending) Recolor();
@@ -370,7 +370,7 @@ public sealed class CodeEditor : Grid
         }
         catch (Exception ex) { Services.CrashLog.Report(ex, "编辑器主题-弹层"); }
         // 富文本内核的默认字符格式同步新主题：之后新输入的文字颜色立即正确
-        try
+        Services.Safe.Run(() =>
         {
             if (_re.Document is { } doc)
             {
@@ -378,10 +378,9 @@ public sealed class CodeEditor : Grid
                 fmt.ForegroundColor = _baseFg;
                 doc.SetDefaultCharacterFormat(fmt);
             }
-        }
-        catch { }
-        try { HideHint(); } catch { }   // 参数提示随主题复位，下次输入重新弹出
-        try { HidePopup(); } catch { }  // 弹层状态整体复位，下次输入重新弹出
+        }, "编辑器主题-默认字色");
+        Services.Safe.Run(HideHint, "提示浮层复位");   // 参数提示随主题复位，下次输入重新弹出
+        Services.Safe.Run(HidePopup, "候选弹层复位");  // 弹层状态整体复位，下次输入重新弹出
         try
         {
             _gutterKey = "";        // 行号栏按新主题强制重绘
@@ -695,7 +694,7 @@ public sealed class CodeEditor : Grid
             Canvas.SetTop(_miniView, y);
             _miniView.Visibility = Visibility.Visible;
         }
-        catch { }
+        catch (Exception ex) { Services.Safe.Swallowed("小地图视口刷新", ex); }
     }
 
     void OnMiniPointer(object sender, PointerRoutedEventArgs e)
@@ -724,7 +723,7 @@ public sealed class CodeEditor : Grid
                 _minimap.ReleasePointerCapture(e.Pointer);
             }
         }
-        catch { }
+        catch (Exception ex) { Services.Safe.Swallowed("小地图指针交互", ex); }
     }
 
     static ScrollViewer? FindScroll(DependencyObject root)
@@ -846,7 +845,7 @@ public sealed class CodeEditor : Grid
     {
         if (!_sbDragging) return;
         _sbDragging = false;
-        try { _sbTrack.ReleasePointerCapture(e.Pointer); } catch { }
+        Services.Safe.Run(() => _sbTrack.ReleasePointerCapture(e.Pointer), "滚动条指针释放");
         try
         {
             // 松手时指针若已离轨，悬停态一并收掉
@@ -947,7 +946,7 @@ public sealed class CodeEditor : Grid
                 f.ForegroundColor = RainbowColorAt(p);
             }
         }
-        catch { }
+        catch (Exception ex) { Services.Safe.Swallowed("彩虹括号恢复", ex); }
         _hlA = _hlB = -1;
     }
 
@@ -996,7 +995,7 @@ public sealed class CodeEditor : Grid
                 i++;
             }
         }
-        catch { }
+        catch (Exception ex) { Services.Safe.Swallowed("彩虹诊断采集", ex); }
         return list;
     }
 
@@ -1070,7 +1069,7 @@ public sealed class CodeEditor : Grid
             if (m < 0) return;
             Sel(m, 0);
         }
-        catch { }
+        catch (Exception ex) { Services.Safe.Swallowed("括号配对跳转", ex); }
     }
 
     // ---------- 代码折叠 ----------
@@ -1162,7 +1161,7 @@ public sealed class CodeEditor : Grid
         {
             SetRawSafe(full);
             int target = Math.Min(SelPos, full.Length);
-            try { var (s, e2) = LineSpan(blk.StartLine0 + 1); target = e2; } catch { }
+            Services.Safe.Run(() => { var (s, e2) = LineSpan(blk.StartLine0 + 1); target = e2; }, "折叠展开定位");
             Sel(Math.Min(target, full.Length), 0);
         }
         ScheduleRecolor();
@@ -1351,7 +1350,7 @@ public sealed class CodeEditor : Grid
                     doc.SetDefaultCharacterFormat(fmt);
                 }
             }
-            catch { }
+            catch (Exception ex) { Services.Safe.Swallowed("大文件默认字色", ex); }
             ScheduleRecolor();
         }
         else
@@ -1878,12 +1877,12 @@ public sealed class CodeEditor : Grid
             _colorPending = true;
             _colorTimer.Start();
         }
-        catch { }
+        catch (Exception ex) { Services.Safe.Swallowed("着色定时器启动", ex); }
     }
 
     void ColorTimerTick(object? s, object e)
     {
-        try { _colorTimer?.Stop(); } catch { }
+        Services.Safe.Run(() => _colorTimer?.Stop(), "着色定时器停止");
         _colorPending = false;
         Recolor();
     }
@@ -2020,7 +2019,7 @@ public sealed class CodeEditor : Grid
                 doc.GetRange(start, end).CharacterFormat.BackgroundColor = fill;
             }
         }
-        catch { }
+        catch (Exception ex) { Services.Safe.Swallowed("块高亮重绘", ex); }
     }
 
     Windows.UI.Color TokenColor(TokKind k)
@@ -2069,7 +2068,7 @@ public sealed class CodeEditor : Grid
                 ops++;
             }
         }
-        catch { }
+        catch (Exception ex) { Services.Safe.Swallowed("彩虹括号上色", ex); }
     }
 
     // ================= 智能提示（VS 风格） =================
@@ -2440,7 +2439,7 @@ public sealed class CodeEditor : Grid
                 }
             }
         }
-        catch { }
+        catch (Exception ex) { Services.Safe.Swallowed("块高亮清除", ex); }
         _blockHi.Clear();
         if (!silent) { _blockOn = false; _blockAnchor = null; }
     }
