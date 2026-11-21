@@ -131,10 +131,16 @@ jobs:
           $appExe = Find-AppExe
           if (-not $appExe) { throw "安装后所有常规盘符都找不到 TaoPad.exe" }
           Write-Host "安装位置: $appExe"
+          # 诊断盲区回灌 (TaoDown run 44908603086 同型): CA 执行痕迹只在 ProgramData, 不取回则误判无从查起
+          New-Item -ItemType Directory -Force -Path evidence\runtime-diag | Out-Null
+          Copy-Item "C:\ProgramData\TaoPad\*" evidence\runtime-diag\ -Force -ErrorAction SilentlyContinue
           Start-Process $appExe
           Start-Sleep -Seconds 15
           # 假绿防线 (TaoDown run 44902582756 实锤同型坑): 运行时缺失时应用弹错误对话框, 进程仍活着, 只查进程会假绿
+          # run 44908613235 实锤: pwsh 未加载 UIAutomation 程序集时防线自身抛 InvalidOperation, 须先 Add-Type
           Start-Sleep -Seconds 3
+          Add-Type -AssemblyName UIAutomationClient
+          Add-Type -AssemblyName UIAutomationTypes
           $errDlg = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Children, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, "TaoPad.exe - This application could not be started")))
           if ($errDlg) { throw "启动错误对话框: Windows App Runtime 缺失 (见截图)" }
           if (-not (Get-Process TaoPad -ErrorAction SilentlyContinue)) { throw "启动后进程不在运行" }

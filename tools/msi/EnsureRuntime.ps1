@@ -102,11 +102,13 @@ if ($env:TAOPAD_FORCE_RUNTIME_DOWNLOAD -ne '1' -and (Test-DesktopRuntime10)) {
 function Test-WinAppRuntime {
     try {
         # -AllUsers: msiexec 以 SYSTEM 执行, 普通查询只看 SYSTEM 用户包, provisioned 包会漏检
-        $hit = Get-AppxPackage -AllUsers -Name 'Microsoft.WindowsAppRuntime.1.5*' -ErrorAction Stop
+        # 同型坑回灌 (TaoDown run 44908603086 实锤): 通配 1.5* 会命中 Framework/Delta 等零碎包,
+        # 缺 Main 包时误判在位, 应用启动仍弹运行时缺失; 应用依赖的是 Main 主框架包, 检测必须查 Main
+        $hit = Get-AppxPackage -AllUsers -Name 'Microsoft.WindowsAppRuntime.Main.1.5*' -ErrorAction Stop
         if ($hit) { return $true }
     } catch { }
     try {
-        if (Get-ChildItem 'C:\Program Files\WindowsApps\Microsoft.WindowsAppRuntime.1.5_*' -Directory -ErrorAction SilentlyContinue) { return $true }
+        if (Get-ChildItem 'C:\Program Files\WindowsApps\Microsoft.WindowsAppRuntime.Main.1.5_*' -Directory -ErrorAction SilentlyContinue) { return $true }
     } catch { }
     return $false
 }
