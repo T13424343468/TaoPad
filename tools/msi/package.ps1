@@ -36,17 +36,20 @@ if ($wxsRaw -notmatch 'Version="(\d+\.\d+\.\d+)"') { throw "Package.wxs 里找�
 $pkgVersion = $Matches[1]
 $msi = Join-Path $OutDir "TaoPad-$pkgVersion-x64.msi"
 if (Test-Path $msi) { Remove-Item $msi -Force }
+# ---- 全系安装器运行时新标准 (2026-11-21 老板令): 安装包不内置运行时 ----
+# 安装期由 EnsureRuntime.ps1 检测/补装三项运行时; 脚本随发布文件进包 (wxs Files ** 自动收)。
+# 顺序铁律 (TaoPad run 44902065712 实锤 1603): 拷贝必须排在 wix build 之前——
+# Files Include 是打包瞬间枚举发布目录, 拷贝放在 build 后面 = 脚本永远进不了 MSI,
+# CA 起跑 powershell -File 找不到文件秒退 (ca-out.txt: "does not exist")。
+$rtSrc = Join-Path $PSScriptRoot 'EnsureRuntime.ps1'
+if (-not (Test-Path $rtSrc)) { throw "运行时保障脚本缺失: $rtSrc (请使用完整包)" }
+Copy-Item $rtSrc (Join-Path $publishRoot 'EnsureRuntime.ps1') -Force
+
 # PublishDir 由命令行传入，界面文件不用改动；自定义 UI 无需额外扩展
 # -pdbtype none：不落调试附档（.wixpdb），保证 out 里只有 msi 一项
 & wix build $WxsPath -d "PublishDir=$publishRoot" -o $msi -pdbtype none
 if ($LASTEXITCODE -ne 0) { throw "WiX 构建 msi 失败" }
 Get-ChildItem $OutDir -Filter *.wixpdb -ErrorAction SilentlyContinue | Remove-Item -Force
-
-# ---- 全系安装器运行时新标准 (2026-11-21 老板令): 安装包不内置运行时 ----
-# 安装期由 EnsureRuntime.ps1 检测/补装三项运行时; 脚本随发布文件进包 (wxs Files ** 自动收)。
-$rtSrc = Join-Path $PSScriptRoot 'EnsureRuntime.ps1'
-if (-not (Test-Path $rtSrc)) { throw "运行时保障脚本缺失: $rtSrc (请使用完整包)" }
-Copy-Item $rtSrc (Join-Path $publishRoot 'EnsureRuntime.ps1') -Force
 
 # ===== 构建后自检：MSI 里必须真的带微信风格单页界面（MainDlg）=====
 # 防止"源码里定义了，装出来却是标准向导"的回归：出包时就把问题卡死。

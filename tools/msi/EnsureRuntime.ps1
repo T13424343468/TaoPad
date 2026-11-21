@@ -5,7 +5,7 @@
 #   3) VC++ 2015-2022 运行库 —— 缺则联网下官方 vc_redist.x64.exe 静默装
 #   有则零下载直接用; 无网且无运行时给通俗重试指引。
 # 云测钩子: TAOPAD_FORCE_RUNTIME_DOWNLOAD=1 强制三项全走下载路 (断言二用), 日常安装不设即走检测路。
-#   该变量由 WiX 自定义动作内 cmd set 从 MSI 公共属性 TAOZIPFORCE 注入 (环境变量传不进 msiexec 服务上下文, run 44885229031 实锤)。
+#   该变量由 WiX 自定义动作内 cmd set 从 MSI 公共属性 TAOPADFORCE 注入 (环境变量传不进 msiexec 服务上下文, run 44885229031 实锤)。
 $ErrorActionPreference = 'Stop'
 # 日志落机器级固定路径: 本脚本由 WiX 自定义动作在 per-machine msiexec (SYSTEM) 上下文执行,
 #   $env:TEMP 指向 C:\Windows\Temp, 云测断言按 runner 用户 TEMP 查不到 (run 44870126512 实锤);
