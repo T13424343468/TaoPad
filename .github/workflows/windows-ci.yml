@@ -15,11 +15,18 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+      - name: 安装界面框架运行时（框架依赖发布需 WinAppSDK 1.5, 云台没有）
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:TEMP 'windowsappruntimeinstall-x64.exe'
+          Invoke-WebRequest -Uri 'https://aka.ms/windowsappsdk/1.5/latest/windowsappruntimeinstall-x64.exe' -OutFile $exe
+          $p = Start-Process -FilePath $exe -ArgumentList '--quiet' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "WinAppSDK 1.5 运行时安装失败: $($p.ExitCode)" }
 
-      - name: 安装 .NET 8 SDK
+      - name: 安装 .NET 10 SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       - name: 源码自检（BOM/编码/占位符检查）
         shell: pwsh
@@ -31,10 +38,10 @@ jobs:
       - name: 纯逻辑回归（LogicTests，红即停）
         run: dotnet run --project tests/LogicTests -c Release
 
-      - name: 云端 Windows 编译（Release x64 自包含）
+      - name: 云端出包（Release x64 框架依赖——安装包不内置 .NET 运行时）
         run: >
           dotnet publish src/AntPad/AntPad.csproj -c Release -r win-x64
-          --self-contained true -p:WindowsAppSDKSelfContained=true -p:Platform=x64
+          --self-contained false -p:Platform=x64
 
       - name: 定位发布目录
         shell: pwsh
@@ -72,6 +79,13 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+      - name: 安装界面框架运行时（框架依赖发布需 WinAppSDK 1.5, 云台没有）
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:TEMP 'windowsappruntimeinstall-x64.exe'
+          Invoke-WebRequest -Uri 'https://aka.ms/windowsappsdk/1.5/latest/windowsappruntimeinstall-x64.exe' -OutFile $exe
+          $p = Start-Process -FilePath $exe -ArgumentList '--quiet' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "WinAppSDK 1.5 运行时安装失败: $($p.ExitCode)" }
 
       - name: 下载安装包
         uses: actions/download-artifact@v4
@@ -94,9 +108,7 @@ jobs:
             $g.Dispose(); $bmp.Dispose()
           }
           $msi = (Resolve-Path out/*.msi).Path
-          $p = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart","/l*v","evidence\install.log" -Wait -PassThru
-          Write-Host "msiexec 退出码: $($p.ExitCode)"
-          if ($p.ExitCode -ne 0) { throw "静默安装失败，退出码 $($p.ExitCode)" }
+          ./tools/msi/invoke-msi.ps1 -MsiArgs "/i `"$msi`" /qn /norestart /l*v evidence\install.log" -LogPath evidence\install.log
           function Find-AppExe {
             $regKey = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*","HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
                       Where-Object { $_.DisplayName -like "*TaoPad*" } | Select-Object -First 1
@@ -198,6 +210,13 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+      - name: 安装界面框架运行时（框架依赖发布需 WinAppSDK 1.5, 云台没有）
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:TEMP 'windowsappruntimeinstall-x64.exe'
+          Invoke-WebRequest -Uri 'https://aka.ms/windowsappsdk/1.5/latest/windowsappruntimeinstall-x64.exe' -OutFile $exe
+          $p = Start-Process -FilePath $exe -ArgumentList '--quiet' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "WinAppSDK 1.5 运行时安装失败: $($p.ExitCode)" }
 
       - name: 下载安装包
         uses: actions/download-artifact@v4
@@ -210,8 +229,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path evidence | Out-Null
           $msi = (Resolve-Path out/*.msi).Path
-          $p = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "静默安装失败，退出码 $($p.ExitCode)" }
+          ./tools/msi/invoke-msi.ps1 -MsiArgs "/i `"$msi`" /qn /norestart /l*v out\install.log" -LogPath out\install.log
 
       - name: 恶意攻击者视角（异常输入/路径穿越/崩溃监测）
         shell: pwsh
@@ -289,6 +307,13 @@ jobs:
 
       - name: 检出代码
         uses: actions/checkout@v4
+      - name: 安装界面框架运行时（框架依赖发布需 WinAppSDK 1.5, 云台没有）
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:TEMP 'windowsappruntimeinstall-x64.exe'
+          Invoke-WebRequest -Uri 'https://aka.ms/windowsappsdk/1.5/latest/windowsappruntimeinstall-x64.exe' -OutFile $exe
+          $p = Start-Process -FilePath $exe -ArgumentList '--quiet' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "WinAppSDK 1.5 运行时安装失败: $($p.ExitCode)" }
 
       - name: 下载安装包
         uses: actions/download-artifact@v4
@@ -300,8 +325,7 @@ jobs:
         shell: pwsh
         run: |
           $msi = (Resolve-Path out/*.msi).Path
-          $p = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "静默安装失败，退出码 $($p.ExitCode)" }
+          ./tools/msi/invoke-msi.ps1 -MsiArgs "/i `"$msi`" /qn /norestart /l*v out\install.log" -LogPath out\install.log
 
       - name: 启用崩溃转储抓取（崩溃后系统自动落 dump）
         shell: pwsh
@@ -364,6 +388,13 @@ jobs:
 
       - name: 检出代码
         uses: actions/checkout@v4
+      - name: 安装界面框架运行时（框架依赖发布需 WinAppSDK 1.5, 云台没有）
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:TEMP 'windowsappruntimeinstall-x64.exe'
+          Invoke-WebRequest -Uri 'https://aka.ms/windowsappsdk/1.5/latest/windowsappruntimeinstall-x64.exe' -OutFile $exe
+          $p = Start-Process -FilePath $exe -ArgumentList '--quiet' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "WinAppSDK 1.5 运行时安装失败: $($p.ExitCode)" }
 
       - name: 下载安装包
         uses: actions/download-artifact@v4
@@ -375,8 +406,7 @@ jobs:
         shell: pwsh
         run: |
           $msi = (Resolve-Path out/*.msi).Path
-          $p = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "静默安装失败，退出码 $($p.ExitCode)" }
+          ./tools/msi/invoke-msi.ps1 -MsiArgs "/i `"$msi`" /qn /norestart /l*v out\install.log" -LogPath out\install.log
 
       - name: 启用崩溃转储抓取（崩溃后系统自动落 dump）
         shell: pwsh
@@ -431,6 +461,13 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+      - name: 安装界面框架运行时（框架依赖发布需 WinAppSDK 1.5, 云台没有）
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:TEMP 'windowsappruntimeinstall-x64.exe'
+          Invoke-WebRequest -Uri 'https://aka.ms/windowsappsdk/1.5/latest/windowsappruntimeinstall-x64.exe' -OutFile $exe
+          $p = Start-Process -FilePath $exe -ArgumentList '--quiet' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "WinAppSDK 1.5 运行时安装失败: $($p.ExitCode)" }
 
       - name: 下载安装包
         uses: actions/download-artifact@v4
@@ -453,18 +490,14 @@ jobs:
             $g.Dispose(); $bmp.Dispose()
           }
           $msi = (Resolve-Path out/*.msi).Path
-          $p1 = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart" -Wait -PassThru
-          if ($p1.ExitCode -ne 0) { throw "覆盖安装失败，退出码 $($p1.ExitCode)" }
-          Write-Host "覆盖安装退出码: $($p1.ExitCode)"
-          $p2 = Start-Process msiexec.exe -ArgumentList "/x","`"$msi`"","/qn","/norestart" -Wait -PassThru
-          if ($p2.ExitCode -ne 0) { throw "静默卸载失败，退出码 $($p2.ExitCode)" }
+          ./tools/msi/invoke-msi.ps1 -MsiArgs "/i `"$msi`" /qn /norestart /l*v out\cover.log" -LogPath out\cover.log
+          ./tools/msi/invoke-msi.ps1 -MsiArgs "/x `"$msi`" /qn /norestart /l*v out\uninstall.log" -LogPath out\uninstall.log
           Start-Sleep -Seconds 3
           $gone = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*","HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
                   Where-Object { $_.DisplayName -like "*TaoPad*" }
           if ($gone) { throw "卸载后注册表仍有残留条目" }
           Write-Host "卸载校验：注册表无残留"
-          $p3 = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart" -Wait -PassThru
-          if ($p3.ExitCode -ne 0) { throw "重装失败，退出码 $($p3.ExitCode)" }
+          ./tools/msi/invoke-msi.ps1 -MsiArgs "/i `"$msi`" /qn /norestart /l*v out\reinstall.log" -LogPath out\reinstall.log
           Start-Sleep -Seconds 5
           Snap "evidence\l8-reinstall.png"
           Write-Host "升级与回滚路径：覆盖安装、静默卸载、重装均通过"
@@ -486,6 +519,13 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+      - name: 安装界面框架运行时（框架依赖发布需 WinAppSDK 1.5, 云台没有）
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:TEMP 'windowsappruntimeinstall-x64.exe'
+          Invoke-WebRequest -Uri 'https://aka.ms/windowsappsdk/1.5/latest/windowsappruntimeinstall-x64.exe' -OutFile $exe
+          $p = Start-Process -FilePath $exe -ArgumentList '--quiet' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "WinAppSDK 1.5 运行时安装失败: $($p.ExitCode)" }
 
       - name: 下载安装包
         uses: actions/download-artifact@v4
@@ -498,8 +538,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path evidence | Out-Null
           $msi = (Resolve-Path out/*.msi).Path
-          $p = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "静默安装失败，退出码 $($p.ExitCode)" }
+          ./tools/msi/invoke-msi.ps1 -MsiArgs "/i `"$msi`" /qn /norestart /l*v out\install.log" -LogPath out\install.log
 
       - name: 长稳浸泡 30 分钟（自动班：定时/手动触发）
         shell: pwsh
@@ -569,6 +608,13 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+      - name: 安装界面框架运行时（框架依赖发布需 WinAppSDK 1.5, 云台没有）
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:TEMP 'windowsappruntimeinstall-x64.exe'
+          Invoke-WebRequest -Uri 'https://aka.ms/windowsappsdk/1.5/latest/windowsappruntimeinstall-x64.exe' -OutFile $exe
+          $p = Start-Process -FilePath $exe -ArgumentList '--quiet' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "WinAppSDK 1.5 运行时安装失败: $($p.ExitCode)" }
 
       - name: 下载安装包
         uses: actions/download-artifact@v4
@@ -580,8 +626,7 @@ jobs:
         shell: pwsh
         run: |
           $msi = (Resolve-Path out/*.msi).Path
-          $p = Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/qn","/norestart" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "静默安装失败，退出码 $($p.ExitCode)" }
+          ./tools/msi/invoke-msi.ps1 -MsiArgs "/i `"$msi`" /qn /norestart /l*v out\install.log" -LogPath out\install.log
 
       - name: 【关7·健壮】 异常注入组（满盘保存/monkey）+ 性能基线 + 录屏
         shell: pwsh
@@ -735,3 +780,122 @@ jobs:
           name: evidence-robustness
           path: evidence/**
           retention-days: 14
+
+  # 作业 8：安装链（打包/首装/运行时两路断言/覆盖/卸载/重装视觉，独立 runner）
+  install-chain:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      - name: 安装 .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: 云端出包（Release x64 框架依赖——安装包不内置 .NET 运行时）
+        run: >
+          dotnet publish src/AntPad/AntPad.csproj -c Release -r win-x64
+          --self-contained false -p:Platform=x64
+      - name: 定位发布目录
+        shell: pwsh
+        run: |
+          $pub = Get-ChildItem -Directory -Recurse -Path src/AntPad/bin/x64/Release |
+                 Where-Object { $_.Name -eq 'publish' -and (Test-Path (Join-Path $_.FullName 'TaoPad.exe')) } |
+                 Select-Object -First 1
+          if (-not $pub) { throw "没找到含 TaoPad.exe 的 publish 目录" }
+          "PUBLISH_DIR=$($pub.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: 打包 MSI（微信风格自绘单页 + 构建后自检）
+        shell: pwsh
+        run: ./tools/msi/package.ps1 -PublishDir "$env:PUBLISH_DIR" -OutDir out -WxsPath src/Installer/Package.wxs
+      - name: 安装包外观核验（体积/版本）
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path evidence | Out-Null
+          $msi = Get-Item out\*.msi
+          "MSI: $($msi.Name)  $([math]::Round($msi.Length/1MB,1)) MB" | Out-File evidence\msi-facts.txt
+          if ($msi.Length -lt 1MB) { throw "MSI 体积异常偏小, 可能打包空目录: $msi" }
+      - name: 静默安装（首装）
+        shell: pwsh
+        run: |
+          $msi = (Get-Item out\*.msi).FullName
+          Remove-Item (Join-Path $env:ProgramData 'TaoPad\taopad-runtime.log') -Force -ErrorAction SilentlyContinue
+          ./tools/msi/invoke-msi.ps1 -MsiArgs "/i `"$msi`" /qn /norestart /l*v out\install.log" -LogPath out\install.log
+          Write-Host "assert: uninstall reg"
+          $unins = Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall' |
+                   Where-Object { $_.GetValue('DisplayName') -eq 'TaoPad' }
+          if (-not $unins) { throw "首装后没有卸载登记" }
+          if ($unins.GetValue('DisplayVersion') -notlike '1.1.2*') { throw "首装后版本不是 1.1.2: $($unins.GetValue('DisplayVersion'))" }
+          "first-install: ok $($unins.GetValue('DisplayVersion'))" | Out-File evidence\msi-facts.txt -Append
+      - name: 运行时两路断言（有运行时零下载）
+        shell: pwsh
+        run: |
+          # 新标准断言一 (全系安装器新标准): 云台 SDK 自带 .NET 桌面运行时, .NET 必须零下载直接用;
+          # 界面框架与 VC++ 云台没有, 缺则联网装齐 (present 或 download-install ok 均算保障到位)
+          $log = Join-Path $env:ProgramData 'TaoPad\taopad-runtime.log'
+          if (-not (Test-Path $log)) { throw "运行时保障日志缺失: $log" }
+          $lines = Get-Content $log
+          if (-not ($lines | Where-Object { $_ -match 'runtime-present zero-download' })) { throw ".NET 未走零下载路: $($lines -join '; ')" }
+          if (-not ($lines | Where-Object { $_ -match 'winappruntime-(present zero-download|download-install ok)' })) { throw "界面框架运行时未装齐: $($lines -join '; ')" }
+          if (-not ($lines | Where-Object { $_ -match 'vcruntime-(present zero-download|download-install ok)' })) { throw "VC++ 运行库未装齐: $($lines -join '; ')" }
+          "runtime-path-natural: ok" | Out-File evidence\msi-facts.txt -Append
+      - name: 覆盖安装（同版本 AllowSameVersionUpgrades）
+        shell: pwsh
+        run: |
+          $msi = (Get-Item out\*.msi).FullName
+          ./tools/msi/invoke-msi.ps1 -MsiArgs "/i `"$msi`" /qn /norestart /l*v out\cover.log" -LogPath out\cover.log
+          "cover-install: ok" | Out-File evidence\msi-facts.txt -Append
+      - name: 卸载后核验（登记清空）
+        shell: pwsh
+        run: |
+          $msi = (Get-Item out\*.msi).FullName
+          ./tools/msi/invoke-msi.ps1 -MsiArgs "/x `"$msi`" /qn /norestart /l*v out\uninstall.log" -LogPath out\uninstall.log
+          $unins = Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall' |
+                   Where-Object { $_.GetValue('DisplayName') -eq 'TaoPad' }
+          if ($unins) { throw "卸载后卸载登记仍在" }
+          "uninstall: ok" | Out-File evidence\msi-facts.txt -Append
+      - name: 重装 + 装后视觉（启动/进程/截图）
+        shell: pwsh
+        run: |
+          $msi = (Get-Item out\*.msi).FullName
+          ./tools/msi/invoke-msi.ps1 -MsiArgs "/i `"$msi`" /qn /norestart /l*v out\reinstall.log" -LogPath out\reinstall.log
+          $unins = Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall' |
+                   Where-Object { $_.GetValue('DisplayName') -eq 'TaoPad' } | Select-Object -First 1
+          $appExe = Join-Path $unins.GetValue('InstallLocation') 'TaoPad.exe'
+          if (-not (Test-Path $appExe)) { throw "重装后安装目录没有 TaoPad.exe: $appExe" }
+          Start-Process $appExe
+          Start-Sleep -Seconds 15
+          if (-not (Get-Process TaoPad -ErrorAction SilentlyContinue)) { throw "重装后进程未存活" }
+          Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap($b.Width, $b.Height)
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("$PWD\evidence\installed-app.png", [System.Drawing.Imaging.ImageFormat]::Png)
+          $g.Dispose(); $bmp.Dispose()
+          Stop-Process -Name TaoPad -Force -ErrorAction SilentlyContinue
+          "visual: ok" | Out-File evidence\msi-facts.txt -Append
+      - name: 运行时两路断言（无运行时下载装齐）
+        shell: pwsh
+        run: |
+          # 新标准断言二: 强制三项全走下载路, 官方运行时装齐后以实测为准
+          ./tools/msi/invoke-msi.ps1 -MsiArgs "/x `"$((Get-Item out\*.msi).FullName)`" /qn /norestart /l*v out\uninstall2.log" -LogPath out\uninstall2.log
+          Remove-Item (Join-Path $env:ProgramData 'TaoPad\taopad-runtime.log') -Force -ErrorAction SilentlyContinue
+          # 强制下载路开关走 MSI 公共属性 TAOPADFORCE=1: 环境变量传不进 msiexec 服务上下文 (TaoZip run 44885229031 实锤)
+          ./tools/msi/invoke-msi.ps1 -MsiArgs "/i `"$((Get-Item out\*.msi).FullName)`" TAOPADFORCE=1 /qn /norestart /l*v out\forced-runtime.log" -LogPath out\forced-runtime.log
+          $log = Join-Path $env:ProgramData 'TaoPad\taopad-runtime.log'
+          if (-not (Test-Path $log)) { throw "运行时保障日志缺失: $log" }
+          $lines = Get-Content $log
+          if (-not ($lines | Where-Object { $_ -match 'runtime-download-install ok' })) { throw ".NET 强制下载路未装齐: $($lines -join '; ')" }
+          if (-not ($lines | Where-Object { $_ -match 'winappruntime-download-install ok' })) { throw "界面框架强制下载路未装齐: $($lines -join '; ')" }
+          if (-not ($lines | Where-Object { $_ -match 'vcruntime-download-install ok' })) { throw "VC++ 强制下载路未装齐: $($lines -join '; ')" }
+          "runtime-path-forced: ok" | Out-File evidence\msi-facts.txt -Append
+      - name: 存档安装链证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taopad-install-chain-evidence
+          path: |
+            evidence
+            out/*.log
+            out/*.msi

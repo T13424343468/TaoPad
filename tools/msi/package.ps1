@@ -42,6 +42,12 @@ if (Test-Path $msi) { Remove-Item $msi -Force }
 if ($LASTEXITCODE -ne 0) { throw "WiX 构建 msi 失败" }
 Get-ChildItem $OutDir -Filter *.wixpdb -ErrorAction SilentlyContinue | Remove-Item -Force
 
+# ---- 全系安装器运行时新标准 (2026-11-21 老板令): 安装包不内置运行时 ----
+# 安装期由 EnsureRuntime.ps1 检测/补装三项运行时; 脚本随发布文件进包 (wxs Files ** 自动收)。
+$rtSrc = Join-Path $PSScriptRoot 'EnsureRuntime.ps1'
+if (-not (Test-Path $rtSrc)) { throw "运行时保障脚本缺失: $rtSrc (请使用完整包)" }
+Copy-Item $rtSrc (Join-Path $publishRoot 'EnsureRuntime.ps1') -Force
+
 # ===== 构建后自检：MSI 里必须真的带微信风格单页界面（MainDlg）=====
 # 防止"源码里定义了，装出来却是标准向导"的回归：出包时就把问题卡死。
 $found = $false

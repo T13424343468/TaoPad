@@ -1,4 +1,4 @@
-REM TaoPad 一键构建（需 Windows 10 1809+ 与 .NET 8 SDK）
+REM TaoPad 一键构建（需 Windows 10 1809+ 与 .NET 10 SDK）
 REM 产物统一输出 out 文件夹: 仅 1 项 TaoPad-1.0.10-x64.msi（微信风格安装器）
 @echo off
 chcp 936 >nul
@@ -11,9 +11,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "tools\Check-Source.ps1" || 
 echo [2/5] 还原依赖...
 dotnet restore src\AntPad\AntPad.csproj || goto :err
 echo [3/5] 生成自包含发布包 (首次较慢, 需下载运行时组件)...
-dotnet publish src\AntPad\AntPad.csproj -c Release -r win-x64 --self-contained true -p:WindowsAppSDKSelfContained=true -p:Platform=x64 || goto :err
-set "PUBDIR=src\AntPad\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\publish"
-if not exist "%PUBDIR%\TaoPad.exe" set "PUBDIR=src\AntPad\bin\x64\Release\net8.0-windows10.0.19041.0\x64\win-x64\publish"
+dotnet publish src\AntPad\AntPad.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64 || goto :err
+set "PUBDIR=src\AntPad\bin\x64\Release\net10.0-windows10.0.19041.0\win-x64\publish"
+if not exist "%PUBDIR%\TaoPad.exe" set "PUBDIR=src\AntPad\bin\x64\Release\net10.0-windows10.0.19041.0\x64\win-x64\publish"
 echo [4/5] 生成安装器 (.msi, 首次需联网安装打包工具)...
 if exist out rmdir /s /q out >nul 2>&1
 if exist out (
