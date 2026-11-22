@@ -45,9 +45,10 @@ $rtSrc = Join-Path $PSScriptRoot 'EnsureRuntime.ps1'
 if (-not (Test-Path $rtSrc)) { throw "运行时保障脚本缺失: $rtSrc (请使用完整包)" }
 Copy-Item $rtSrc (Join-Path $publishRoot 'EnsureRuntime.ps1') -Force
 
-# PublishDir 由命令行传入，界面文件不用改动；自定义 UI 无需额外扩展
+# PublishDir 由命令行传入，界面文件不用改动
+# -ext WixToolset.Util.wixext：EnsureRuntimes CA 用 WixQuietExec64（下载不弹命令窗，全系安装器标准）
 # -pdbtype none：不落调试附档（.wixpdb），保证 out 里只有 msi 一项
-& wix build $WxsPath -d "PublishDir=$publishRoot" -o $msi -pdbtype none
+& wix build $WxsPath -d "PublishDir=$publishRoot" -o $msi -pdbtype none -ext WixToolset.Util.wixext
 if ($LASTEXITCODE -ne 0) { throw "WiX 构建 msi 失败" }
 Get-ChildItem $OutDir -Filter *.wixpdb -ErrorAction SilentlyContinue | Remove-Item -Force
 

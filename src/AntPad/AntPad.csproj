@@ -15,13 +15,16 @@
     <EnableMsixTooling>true</EnableMsixTooling>
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
+    <!-- 关闭 SDK 自动注入的 Bootstrap 初始化（默认 true：缺运行时时弹英文错误框后退出），
+         改由 Services/RuntimeSelfHeal 的 ModuleInitializer 接管：中文提示+带进度下载+提权安装+重启 -->
+    <WindowsAppSdkBootstrapInitialize>false</WindowsAppSdkBootstrapInitialize>
     <DefaultLanguage>zh-CN</DefaultLanguage>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <Version>1.1.2</Version>
-    <FileVersion>1.1.2</FileVersion>
-    <InformationalVersion>1.1.2</InformationalVersion>
+    <Version>1.1.3</Version>
+    <FileVersion>1.1.3</FileVersion>
+    <InformationalVersion>1.1.3</InformationalVersion>
     <Product>TaoPad</Product>
     <Company>Tao</Company>
     <Copyright>Copyright (c) 2026</Copyright>

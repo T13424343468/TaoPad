@@ -4,7 +4,7 @@
   <!-- TaoPad 安装包：功能树中可勾选要关联的文件格式 -->
   <Package Codepage="936" Name="TaoPad"
            Manufacturer="TaoPad"
-           Version="1.1.2"
+           Version="1.1.3"
            UpgradeCode="D5A3F0C2-7B18-4E2A-9C4D-1F2E3A4B5C6D"
            Scope="perMachine"
            Compressed="yes">
@@ -31,17 +31,24 @@
          InstallFinalize 落盘脚本执行前跑, EnsureRuntime.ps1 还没装到盘上, powershell
          -File 找不到文件秒退 (TaoZip run 44877397577 实锤); deferred 排在 InstallFiles
          后即落盘后执行。64 位 PowerShell (System64Folder): 32 位 PS 下注册表被重定向
-         漏检 (TaoZip run 44875970874 实锤)。cmd 包一层把 PS 报错重定向落盘拿第一手输出。 -->
+         漏检 (TaoZip run 44875970874 实锤)。
+         下载不弹命令窗 (全系安装器标准): CA 改 WixQuietExec64 (WixToolset.Util 扩展),
+         直接起 PowerShell 不再经 cmd 包一层——旧写法 cmd 窗口在安装期可见 (老板令修)。
+         输出落盘改由 PowerShell 内联完成: 先建日志目录, 脚本输出 *>> 重定向到 ca-out.txt,
+         脚本自身另有 ProgramData\TaoPad\taopad-runtime.log 双通道。 -->
     <!-- 云测钩子属性: 断言二强制走下载路。环境变量传不进 msiexec 服务上下文
-         (TaoZip run 44885229031 实锤), 改走 MSI 公共属性: msiexec /i xxx.msi TAOPADFORCE=1 -->
+         (TaoZip run 44885229031 实锤), 改走 MSI 公共属性: msiexec /i xxx.msi TAOPADFORCE=1;
+         v1.1.3 起以 -ForceDownload 参数传给脚本 (cmd set 环境变量随 cmd 消失, 参数直达) -->
     <Property Id="TAOPADFORCE" Secure="yes" />
     <!-- 版面铁律 (run 44901597525 实锤 1721): SetProperty 必须写在 InstallExecuteSequence
          之前——同挂 After="InstallFiles" 的动作按源码顺序编号, 反过来写会让 EnsureRuntimes
-         先于 RTENSURECMD 求值, 起跑时属性还是空的, cmd 没起来直接 1721→1603 (TaoZip 版面为正解) -->
-    <SetProperty Id="RTENSURECMD" After="InstallFiles" Sequence="execute"
-                 Value="[System64Folder]cmd.exe" />
-    <CustomAction Id="EnsureRuntimes" Property="RTENSURECMD" Execute="deferred" Return="check" Impersonate="no"
-                  ExeCommand="/c mkdir &quot;[CommonAppDataFolder]TaoPad&quot; 2&gt;nul &amp; set &quot;TAOPAD_FORCE_RUNTIME_DOWNLOAD=[TAOPADFORCE]&quot; &amp; &quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]EnsureRuntime.ps1&quot; &gt;&gt; &quot;[CommonAppDataFolder]TaoPad\ca-out.txt&quot; 2&gt;&amp;1" />
+         先于其命令行属性求值, 起跑时属性还是空的直接 1721→1603 (TaoZip 版面为正解)。
+         WixQuietExec64 约定: 与 CA 同名的属性承载完整命令行, 引号内引号用 &quot; 转义,
+         PS 字符串用单引号避免冲突 -->
+    <SetProperty Id="EnsureRuntimes" After="InstallFiles" Sequence="execute"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -Command &quot;New-Item -ItemType Directory -Force -Path '[CommonAppDataFolder]TaoPad' | Out-Null; &amp; '[INSTALLFOLDER]EnsureRuntime.ps1' -ForceDownload '[TAOPADFORCE]' *>> '[CommonAppDataFolder]TaoPad\ca-out.txt'&quot;" />
+    <CustomAction Id="EnsureRuntimes" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="deferred" Return="check" Impersonate="no" />
     <InstallExecuteSequence>
       <Custom Action="SetKillCmd" After="InstallValidate" />
       <Custom Action="KillRunningApp" After="SetKillCmd" />
@@ -78,7 +85,7 @@
         <Control Id="Title" Type="Text" X="20" Y="12" Width="400" Height="22"
                  Text="{\TitleFont}安装 TaoPad" />
         <Control Id="LicenseText" Type="Text" X="20" Y="42" Width="400" Height="92"
-                 Text="TaoPad 1.1.2，版权所有 (c) 2026。本软件供个人与商业用途自由使用。继续安装即表示您接受：本软件按“现状”提供，作者不对使用本软件产生的任何损失承担责任。" />
+                 Text="TaoPad 1.1.3，版权所有 (c) 2026。本软件供个人与商业用途自由使用。继续安装即表示您接受：本软件按“现状”提供，作者不对使用本软件产生的任何损失承担责任。" />
         <Control Id="AcceptCheck" Type="CheckBox" X="20" Y="140" Width="400" Height="16"
                  Property="LICENSE_ACCEPTED" CheckBoxValue="1"
                  Text="我已阅读并同意许可协议" />

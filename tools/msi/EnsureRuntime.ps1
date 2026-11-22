@@ -4,8 +4,10 @@
 #   2) Windows App SDK 运行时 (界面框架, 1.5) —— 缺则联网下官方 WindowsAppRuntimeInstall-x64.exe 静默装
 #   3) VC++ 2015-2022 运行库 —— 缺则联网下官方 vc_redist.x64.exe 静默装
 #   有则零下载直接用; 无网且无运行时给通俗重试指引。
-# 云测钩子: TAOPAD_FORCE_RUNTIME_DOWNLOAD=1 强制三项全走下载路 (断言二用), 日常安装不设即走检测路。
-#   该变量由 WiX 自定义动作内 cmd set 从 MSI 公共属性 TAOPADFORCE 注入 (环境变量传不进 msiexec 服务上下文, run 44885229031 实锤)。
+# 云测钩子: -ForceDownload 1 强制三项全走下载路 (断言二用), 日常安装不传即走检测路。
+#   该参数由 WiX 自定义动作从 MSI 公共属性 TAOPADFORCE 直传 (v1.1.3 起 CA 改 WixQuietExec64,
+#   不再经 cmd, cmd set 环境变量随之消失, 参数直达脚本)。
+param([string]$ForceDownload)
 $ErrorActionPreference = 'Stop'
 # 日志落机器级固定路径: 本脚本由 WiX 自定义动作在 per-machine msiexec (SYSTEM) 上下文执行,
 #   $env:TEMP 指向 C:\Windows\Temp, 云测断言按 runner 用户 TEMP 查不到 (run 44870126512 实锤);
@@ -66,7 +68,7 @@ function Test-DesktopRuntime10 {
         return $false
     } catch { return $false }
 }
-if ($env:TAOPAD_FORCE_RUNTIME_DOWNLOAD -ne '1' -and (Test-DesktopRuntime10)) {
+if ($ForceDownload -ne '1' -and (Test-DesktopRuntime10)) {
     Write-RtLog 'runtime-present zero-download'
 } else {
     Write-RtLog 'runtime-missing, downloading official runtime'
@@ -94,40 +96,59 @@ if ($env:TAOPAD_FORCE_RUNTIME_DOWNLOAD -ne '1' -and (Test-DesktopRuntime10)) {
 
 # ---- 2) Windows App SDK 运行时 (界面框架, 1.5) ----
 # v1.1.2 自带改依赖: 界面框架不再打进安装包, 改装时保障。
-# 检测口径双保险: Appx 包查询 (Microsoft.WindowsAppRuntime.1.5*) 优先, 异常回落
-#   C:\Program Files\WindowsApps 目录探针 (SYSTEM 可枚举); 任一命中即算在位。
+# 检测口径 (官方部署指南 deploy-unpackaged-apps 实锤): 运行时由四类 MSIX 包组成, 四者全在才算在位:
+#   Framework  Microsoft.WindowsAppRuntime.1.5*          (框架包, PackageDependency 指向它)
+#   Main       MicrosoftCorporationII.WinAppRuntime.Main.1.5*  (主框架包; 注意是 WinAppRuntime 不是 WindowsAppRuntime)
+#   Singleton  MicrosoftCorporationII.WinAppRuntime.Singleton*
+#   DDLM       Microsoft.WinAppRuntime.DDLM*             (版本随运行时, 如 5001.373.1736.0-x6)
+#   不同 family 互不满足依赖 (旧「更高版 Main 满足 1.5」探针前提错误, 已删); 四类 AND 检测。
+# 双保险: Appx 包查询 (-AllUsers, msiexec 以 SYSTEM 执行, 普通查询漏 provisioned 包) 优先,
+#   异常回落 C:\Program Files\WindowsApps 目录探针 (SYSTEM 可枚举)。
 # 安装口径: 官方 WindowsAppRuntimeInstall-x64.exe 静默装 (--quiet, 微软 winget 官方清单实锤);
 #   它内部走 AppX 部署服务装 MSIX 并 provisioning 给全体用户, 不走 MSI 链, 与本产品 MSI
 #   事务无 _MSIExecute 互斥 (dotnet-install 同理); 装后以实测为准, 不信安装器退出码。
 function Test-WinAppRuntime {
+    # 目录探针 glob: 包目录形如 <family去掉通配>_<版本>-<架构>, 如 MicrosoftCorporationII.WinAppRuntime.Main.1.5_5001.373.1736.0_x64__8wekyb3d8bbwe
+    $families = @(
+        'Microsoft.WindowsAppRuntime.1.5*',
+        'MicrosoftCorporationII.WinAppRuntime.Main.1.5*',
+        'MicrosoftCorporationII.WinAppRuntime.Singleton*',
+        'Microsoft.WinAppRuntime.DDLM*'
+    )
+    $appxOk = $true
     try {
-        # -AllUsers: msiexec 以 SYSTEM 执行, 普通查询只看 SYSTEM 用户包, provisioned 包会漏检
-        # 同型坑回灌 (TaoDown run 44908603086 实锤): 通配 1.5* 会命中 Framework/Delta 等零碎包,
-        # 缺 Main 包时误判在位, 应用启动仍弹运行时缺失; 应用依赖的是 Main 主框架包, 检测必须查 Main
-        $hit = Get-AppxPackage -AllUsers -Name 'Microsoft.WindowsAppRuntime.Main.1.5*' -ErrorAction Stop
-        if ($hit) { return $true }
+        foreach ($fam in $families) {
+            # -AllUsers: msiexec 以 SYSTEM 执行, 普通查询只看 SYSTEM 用户包, provisioned 包会漏检
+            $hit = Get-AppxPackage -AllUsers -Name $fam -ErrorAction Stop
+            if (-not $hit) { Write-RtLog ("appx-missing " + $fam); $appxOk = $false }
+        }
+        if ($appxOk) { return $true }
     } catch {
         # 32 位 PowerShell 加载 Appx 模块失败是已知形态 (run 44921060474 实锤此路在 CA 上下文不可靠),
         # 落日志后走目录探针, 不当失败处理
         Write-RtLog ("appx-query-unavailable " + $_.Exception.Message)
     }
-    try {
-        if (Get-ChildItem 'C:\Program Files\WindowsApps\Microsoft.WindowsAppRuntime.Main.1.5_*' -Directory -ErrorAction SilentlyContinue) { return $true }
-    } catch { }
-    # 更高版本 Main 在位也算数: 框架依赖应用按最低版本绑定, 机器已有 1.8+ Main 时 1.5 最低要求直接满足
-    # (run 44921060474 实锤: 云台镜像自带更高版 Main, 1.5 安装器「已有更新版」3 秒 exit=0 秒退, Main.1.5 永远不会出现)
-    try {
-        if (Get-ChildItem 'C:\Program Files\WindowsApps\Microsoft.WindowsAppRuntime.Main.1.*_*' -Directory -ErrorAction SilentlyContinue) { Write-RtLog 'main-newer-present'; return $true }
-    } catch { }
-    return $false
+    foreach ($fam in $families) {
+        $glob = $fam.TrimEnd('*') + '_*'
+        try {
+            if (-not (Get-ChildItem (Join-Path 'C:\Program Files\WindowsApps' $glob) -Directory -ErrorAction SilentlyContinue)) {
+                Write-RtLog ("dir-missing " + $glob)
+                return $false
+            }
+        } catch {
+            Write-RtLog ("dir-probe-failed " + $glob)
+            return $false
+        }
+    }
+    return $true
 }
-# 诊断落盘: 把 WindowsApps 下 Main/1.5 相关目录实况写进日志, 下班对账有据可查
+# 诊断落盘: 把 WindowsApps 下 WinAppRuntime 全家族目录实况写进日志, 下班对账有据可查
 try {
     Get-ChildItem 'C:\Program Files\WindowsApps' -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -like 'Microsoft.WindowsAppRuntime*' } |
+        Where-Object { $_.Name -like '*WinAppRuntime*' } |
         ForEach-Object { Write-RtLog ("diag-appx-dir " + $_.Name) }
 } catch { }
-if ($env:TAOPAD_FORCE_RUNTIME_DOWNLOAD -ne '1' -and (Test-WinAppRuntime)) {
+if ($ForceDownload -ne '1' -and (Test-WinAppRuntime)) {
     Write-RtLog 'winappruntime-present zero-download'
 } else {
     Write-RtLog 'winappruntime-missing, downloading official runtime installer'
@@ -170,7 +191,7 @@ function Test-VcRuntime {
     } catch { }
     return $false
 }
-if ($env:TAOPAD_FORCE_RUNTIME_DOWNLOAD -ne '1' -and (Test-VcRuntime)) {
+if ($ForceDownload -ne '1' -and (Test-VcRuntime)) {
     Write-RtLog 'vcruntime-present zero-download'
 } else {
     Write-RtLog 'vcruntime-missing, downloading official redistributable'
