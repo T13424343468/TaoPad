@@ -766,8 +766,21 @@ jobs:
           $rnd = New-Object System.Random
           $end = (Get-Date).AddMinutes(3)
           $sent = 0
+          $relaunches = 0
           while ((Get-Date) -lt $end) {
-            if (-not (Get-Process TaoPad -ErrorAction SilentlyContinue)) { throw "monkey 段进程退出（点击 $sent 次后）" }
+            if (-not (Get-Process TaoPad -ErrorAction SilentlyContinue)) {
+              # run 45009716085 实锤: 随机点击命中关闭钮属合法退出, 不等于崩溃; 判崩以 WER 新增为准,
+              # 无 WER 记录判定为随机点击命中关闭钮, 重拉续测 (上限 3 次, 超限挂账人工核)
+              $werNow = Wer-Count
+              if ($werNow -gt $wer1) { throw "monkey 撞崩：WER 新增 $($werNow - $wer1) 条（点击 $sent 次后进程退出），真缺陷" }
+              if ($relaunches -ge 3) { throw "monkey 段进程退出 $relaunches 次均无 WER 记录，超出重拉上限，挂账人工核" }
+              $relaunches++
+              Write-Host "monkey 段进程退出（点击 $sent 次后）无 WER 记录，判定为随机点击命中关闭钮，第 $relaunches 次重拉续测"
+              Start-Process $appExe
+              Start-Sleep -Seconds 12
+              (New-Object -ComObject WScript.Shell).AppActivate('TaoPad') | Out-Null
+              Start-Sleep -Seconds 2
+            }
             $x = $rnd.Next($bounds.Left + 5, $bounds.Right - 5)
             $y = $rnd.Next($bounds.Top + 5, $bounds.Bottom - 5)
             [M]::SetCursorPos($x, $y)
