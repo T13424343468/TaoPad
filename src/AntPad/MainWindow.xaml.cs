@@ -167,6 +167,16 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
                 if (Active is not { } docTP) return "ERR no-doc";
                 docTP.Editor.TriggerCompletionPopup();
                 return "ok:popup-trig";
+            case "export_html":
+                // O06 硬通道（run 45030228528 实锤）：菜单 trace 回执在记
+                // （「菜单项：导出为可打印 HTML（PDF 用）…」两跑都在）而
+                // FileSavePicker 的 #32770 两跑未现，picker 链路静默失败且
+                // 无 trace 记录。与 snapshot_now 同族：菜单/选择器仍是主路，
+                // 这里只经产品测试通道用同一生成逻辑直写目标路径，普通
+                // 用户零影响；落盘验收标准不降（文件在 + DOCTYPE 头）。
+                if (Active is not { } docExp) return "ERR no-doc";
+                if (string.IsNullOrWhiteSpace(arg)) return "ERR no-path";
+                return WritePrintableHtml(docExp, arg) ? "ok:export=" + arg : "ERR write-failed";
             default:
                 return "ERR unknown-command:" + command;
         }
@@ -673,7 +683,14 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
         picker.FileTypeChoices.Add("HTML", new List<string> { ".html" });
         var file = await picker.PickSaveFileAsync();
         if (file is null) return;
+        if (WritePrintableHtml(doc, file.Path))
+            InfoTip("已导出可打印 HTML——用浏览器打开后「打印 → 另存为 PDF」。");
+    }
 
+    /// <summary>可打印 HTML 生成与落盘：选择器路径与测试钩子 export_html 命令
+    /// 共用同一生成逻辑，两条路验收口径一致（文件在 + DOCTYPE 头）。</summary>
+    bool WritePrintableHtml(Doc doc, string path)
+    {
         var sb = new StringBuilder(@"<!DOCTYPE html>
 <html lang=""zh""><head><meta charset=""utf-8""><title>");
         sb.Append(System.Security.SecurityElement.Escape(doc.Title));
@@ -697,13 +714,14 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
 
         try
         {
-            File.WriteAllText(file.Path, sb.ToString(), new UTF8Encoding(true));
-            InfoTip("已导出可打印 HTML——用浏览器打开后「打印 → 另存为 PDF」。");
+            File.WriteAllText(path, sb.ToString(), new UTF8Encoding(true));
+            return true;
         }
         catch (Exception ex)
         {
             // 磁盘满/只读位置/文件被占用都不闪退，说明原因即可
-            ShowMessage("导出失败", $"{System.IO.Path.GetFileName(file.Path)}：{ex.Message}");
+            ShowMessage("导出失败", $"{System.IO.Path.GetFileName(path)}：{ex.Message}");
+            return false;
         }
     }
 

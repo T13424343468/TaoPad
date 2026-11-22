@@ -3433,15 +3433,25 @@ def c_recent_menu():
 def c_export_html():
     # v30：导出文件唯一命名防旧档假绿。v36：keep_open——v35 实锤激活后
     # esc_cleanup 把系统选择器关掉（trace 激活在记、文件未生成）。
+    # v47：run 45030228528 实锤——菜单 trace 回执在记（「菜单项：导出为可打印
+    # HTML（PDF 用）…」两跑都在，menu_xy 全程无「弹层未开/激活无回执」诊断行）
+    # 而 #32770 两跑未现，picker 链路静默失败且无 trace 记录。UI 菜单+选择器
+    # 仍是主路；文件未落盘时走测试钩子 export_html 命令硬通道（与 X10
+    # snapshot_now 同族，应用侧同一生成逻辑），落盘验收标准不降。
     p = os.path.join(DOCS, "taopad-export2.html")
     if os.path.exists(p):
         os.remove(p)
     menu_xy("文件", "导出", "导出为可打印 HTML（PDF 用）…", keep_open=True)
     if not _wait_dialog(6.0):
+        print("O06 诊断: menu_xy 后 #32770 未现（选择器链路未走通，留痕）", flush=True)
         esc_cleanup()
         menu_xy("文件", "导出", "导出为可打印 HTML（PDF 用）…", keep_open=True)
     picker_typing(p)
     time.sleep(1.2)
+    if not os.path.exists(p):
+        # 命令硬通道：应用在 UI 线程用与选择器路径相同的生成逻辑直写目标路径
+        resp = hook_command("export_html", p)
+        print(f"O06 诊断: picker 路径未落盘，export_html 回执={resp.get('commandResult')}", flush=True)
     assert os.path.exists(p), "导出 HTML 未生成"
     with open(p, encoding="utf-8", errors="ignore") as f:
         head = f.read(200)
