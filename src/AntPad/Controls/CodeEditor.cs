@@ -1397,6 +1397,30 @@ public sealed class CodeEditor : Grid
         }
     }
 
+    /// <summary>
+    /// 测试钩子快照专用正文导出（X15 run 45038397842 实锤）：超过 1MB 的
+    /// 档案只导出首尾探针段。整篇导出要在界面线程做整篇内核拷贝加换行
+    /// 归一，再在后台整篇 JSON 序列化并落盘 30MB+——单次快照可拖过客户端
+    /// 25 秒时限，表现为「快照回不来=界面冻死」误红；且每轮快照都整篇
+    /// 分配，堆里滚 30MB 级 LOH 对象，GC 压力随快照次数累积。改走缓存
+    /// 基线 _lastRaw 切首尾（免 COM 拷贝），探针断言（首/尾子串）与
+    /// 「快照经界面线程、回不来=冻死」的判据都不受影响；小档案整篇
+    /// 导出语义不变。仅 --testhook 会话经 SnapshotForTest 可达。
+    /// </summary>
+    public string SnapshotText()
+    {
+        const int Limit = 1_000_000;   // 超过此长度只导出首尾探针
+        const int Probe = 4096;
+        // _lastRaw 是内核文本的缓存基线（程序化写入与每次真实编辑都同步，
+        // 见 Text setter 与 OnTextChanged）；为空时退回 RawText 全量读兜底
+        var raw = _lastRaw.Length > 0 ? _lastRaw : RawText;
+        if (raw.Length <= Limit)
+            return OutputEol == "\n" ? raw : raw.Replace("\n", OutputEol);
+        var head = raw[..Probe];
+        var tail = raw[^Probe..];
+        return head + $"\n…[快照截断：全文 {raw.Length} 字符，仅导出首尾 {Probe}]…\n" + tail;
+    }
+
     public LangDef SyntaxLanguage
     {
         get => _lang;

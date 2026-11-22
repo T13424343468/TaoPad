@@ -101,14 +101,25 @@ public static class TestHook
                         }
                     }
                     catch { /* 空文件或非 JSON：按旧语义纯快照 */ }
+                    // X15 run 45038397842 实锤：解析后先删请求再办——旧序在
+                    // 响应写盘后才删请求，处理期间到达的下一轮请求会被本轮
+                    // 收尾的删除误吞，客户端白等到超时（偶发「快照回不来」）。
+                    // 先删后办，新请求只会排进下一轮 300ms 轮询，不再丢。
+                    File.Delete(req);
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
                     string? result = cmd is null ? null : await RunCommandAsync(queue, cmd, arg);
                     var snap = await TakeSnapshotAsync(queue, provider);
                     snap.CommandResult = result;
+                    long uiMs = sw.ElapsedMilliseconds;
                     string json = JsonSerializer.Serialize(snap);
                     string tmp = Path.Combine(HookDir, "response.json.tmp");
                     await File.WriteAllTextAsync(tmp, json);
                     File.Move(tmp, Path.Combine(HookDir, "response.json"), overwrite: true);
-                    File.Delete(req);
+                    // 快照周期计时留痕：界面线程段与序列化落盘段分开记，
+                    // 再现「回不来」时日志直接定谳慢在哪一段
+                    TraceLog.Write($"测试钩子：快照回执 docs={snap.Docs.Count} " +
+                        $"界面线程={uiMs}ms 序列化落盘={sw.ElapsedMilliseconds - uiMs}ms" +
+                        (cmd is null ? "" : $" 命令={cmd}"));
                 }
             }
             catch (Exception ex)

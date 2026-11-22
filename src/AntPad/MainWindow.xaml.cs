@@ -394,6 +394,8 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
         try
         {
             var fi = new FileInfo(path);
+            // 打开链路留痕（X15 排查实锤：此前无日志，转发是否接住全靠截图猜）
+            TraceLog.Write($"打开：{path} ({fi.Exists ? fi.Length : -1}B)");
             if (!fi.Exists) { ShowMessage("无法打开文件", $"文件不存在：{path}"); RemoveFailedDoc(doc); return; }
             // 超大文件走只读快看通道（v39.3 老板拍板的分治方案）：
             // 编辑器管 ≤50MB 可编辑；超限不拒开，弹独立快看窗按屏解码
@@ -420,6 +422,9 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
             // 零警告批（2026-11-20）：超大档案按纯文本开——直接落 Plain（与 setter 的
             // null 归一语义一致），消除 CS8625/CS8601 与后续 CS8604 流态污染
             doc.Editor.SyntaxLanguage = text.Length > 2_000_000 ? LangDef.Plain : LangDef.FromFileName(path);
+            // 读取完成留痕：正文长度与语言降级与否一眼可辨
+            TraceLog.Write($"打开完成：{System.IO.Path.GetFileName(path)} 正文={text.Length} 字符 " +
+                $"语言={doc.Editor.SyntaxLanguage.Name}");
             doc.Eol = DetectEol(text);
             // v39.2（老板令）：撤 2MB 只读护栏——大文件可编辑可保存；
             // 50MB 打开硬上限保留（渲染内存安全线）。
@@ -1193,7 +1198,10 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
                 Path = d.FilePath,
                 Dirty = d.Dirty,
                 ReadOnly = d.ReadOnly,
-                Text = d.Editor.Text,
+                // X15 run 45038397842 实锤：大档案整篇导出把快照周期拖过
+                // 客户端 25 秒时限（复验快照超时误报「界面冻死」）。改走
+                // SnapshotText：>1MB 只导首尾探针，小档案整篇语义不变。
+                Text = d.Editor.SnapshotText(),
                 CaretLine = d.Editor.CaretLine,
                 CaretColumn = d.Editor.CaretColumn,
                 SelectionLength = d.Editor.SelectionLength,

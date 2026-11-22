@@ -3843,8 +3843,15 @@ def c_big_color_open():
     ok = False
     deadline = time.time() + 150
     resent = False
+    dumps = 0
     while time.time() < deadline:
+        t0 = time.time()
         data = _try_hook_dump(timeout=25.0)
+        dumps += 1
+        # X15 run 45038397842 实锤：复验快照超时误报「界面冻死」。每轮
+        # 快照耗时留痕，再现时日志直接定谳慢在哪一轮、哪一段
+        print(f"X15: 第{dumps}轮快照 {time.time()-t0:.1f}s "
+              f"回执={'有' if data else '无'}", flush=True)
         if data is not None:
             docs = data.get("docs") or []
             act = data.get("active", -1)
@@ -3870,7 +3877,10 @@ def c_big_color_open():
     assert "bigcolor-probe-920831" in (doc.get("text") or ""), "X15: 大文件正文未进编辑器"
     shot("case-big-color")
     # 复验一次快照仍能回来：着色批次不是把界面拖死后才回执
-    assert _try_hook_dump(timeout=25.0) is not None, "X15: 首次快照后界面已冻死（快照回不来）"
+    t0 = time.time()
+    data2 = _try_hook_dump(timeout=25.0)
+    print(f"X15: 复验快照 {time.time()-t0:.1f}s 回执={'有' if data2 else '无'}", flush=True)
+    assert data2 is not None, "X15: 首次快照后界面已冻死（快照回不来）"
 
 
 def c_huge_boundary():
