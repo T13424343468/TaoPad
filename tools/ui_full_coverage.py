@@ -1499,16 +1499,112 @@ def dialog_present():
         return False
 
 
+def _picker_edit(h, timeout=6.0):
+    """C01 实锤（run 45015435336）：picker 冷启动窗口先在、文件名框焦点未落，
+    固定 1s 后 ^v 落空，ENTER 落 Save 默认名（X19 页签 Documents\无标题 实锤）
+    或 Cancel——两跑全挂。UIA 寻文件名 Edit：优先当前聚焦者，兜底取
+    「文件名」ComboBox 内者，再兜底首个可见可用者。"""
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        try:
+            from pywinauto import Application
+            w = Application(backend="uia").connect(handle=h, timeout=1).window(handle=h)
+            edits = [e for e in w.descendants(control_type="Edit")]
+            for e in edits:
+                try:
+                    if e.is_focused() and e.is_visible():
+                        return e
+                except Exception:
+                    pass
+            for e in edits:
+                try:
+                    if not (e.is_visible() and e.is_enabled()):
+                        continue
+                    nm = ""
+                    try:
+                        nm = e.parent().window_text() or ""
+                    except Exception:
+                        pass
+                    if ("文件名" in nm) or ("file name" in nm.lower()):
+                        return e
+                except Exception:
+                    pass
+            for e in edits:
+                try:
+                    if e.is_visible() and e.is_enabled():
+                        return e
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        time.sleep(0.4)
+    return None
+
+
 def picker_typing(path, wait=3.0):
     t0 = time.time()
-    while not dialog_present() and time.time() - t0 < 10:
-        time.sleep(0.5)
-    time.sleep(1.0)          # 等文件名框就绪，避免开头字符丢失
-    pyperclip.copy(path)
-    send_keys("^v")          # 整段粘贴，杜绝逐键输入被吞
-    time.sleep(0.8)
-    send_keys("{ENTER}")
-    time.sleep(1.5)
+    h = None
+    while not h and time.time() - t0 < 10:
+        try:
+            import win32gui
+            h = win32gui.FindWindow("#32770", None)
+        except Exception:
+            h = None
+        if not h:
+            time.sleep(0.5)
+    if not h:
+        # 无 #32770（已命名直存等）：保持旧行为粘进当前焦点，由调用方断言兜底
+        time.sleep(1.0)
+        pyperclip.copy(path)
+        send_keys("^v")
+        time.sleep(0.8)
+        send_keys("{ENTER}")
+        time.sleep(1.5)
+        return
+    time.sleep(0.5)
+    for attempt in range(3):
+        e = _picker_edit(h)
+        pyperclip.copy(path)
+        if e is not None:
+            try:
+                e.set_edit_text(path)   # ValuePattern 直写，绕开剪贴板/焦点竞态
+                try:
+                    e.set_focus()       # 回车必须落文件名框，防落 Save/Cancel 默认钮
+                except Exception:
+                    pass
+                time.sleep(0.3)
+                send_keys("{ENTER}")
+            except Exception:
+                send_keys("^a")
+                time.sleep(0.25)
+                send_keys("^v")
+                time.sleep(0.8)
+                send_keys("{ENTER}")
+        else:
+            send_keys("^a")
+            time.sleep(0.25)
+            send_keys("^v")             # 整段粘贴，杜绝逐键输入被吞
+            time.sleep(0.8)
+            send_keys("{ENTER}")
+        time.sleep(1.5)
+        try:
+            import win32gui
+            if not win32gui.FindWindow("#32770", None):
+                break
+        except Exception:
+            break
+        # 未收层=本轮未成交：ESC 收掉重来（上限 3 轮）
+        send_keys("{ESC}")
+        time.sleep(0.8)
+        try:
+            import win32gui
+            h2 = win32gui.FindWindow("#32770", None)
+            if not h2:
+                break
+            h = h2
+            e = None
+        except Exception:
+            break
     # 已存在替换确认框：键入回车默认=是
     for _ in range(2):
         try:
@@ -1523,6 +1619,7 @@ def picker_typing(path, wait=3.0):
         except Exception:
             pass
         break
+    time.sleep(0.8)   # 应用侧选择器返回后落盘留痕
 
 
 def wer_count():
