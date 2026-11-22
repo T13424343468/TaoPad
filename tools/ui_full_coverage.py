@@ -270,8 +270,11 @@ def rawwalk_texts(h):
             # 44217756849 实锤：第三参须为 VARIANT，裸 int 触发 comtypes
             # AttributeError（RAWWALK4 ERR），整条原生检索分支报废——
             # 菜单识别最强的名字来源自此全程缺席，直呼 MISS 率飙升。
+            # run 45015435336 再实锤：方法名应为 CreatePropertyCondition
+            # （UIAutomationClient.idl 标准名），CreatePropertyElementCondition
+            # 不存在于 IUIAutomation 类型库包装，整分支仍报废——改名接回。
             from comtypes.automation import VARIANT
-            cond = iuia.CreatePropertyElementCondition(UIA_ProcessIdPropertyId, VARIANT(_pid))
+            cond = iuia.CreatePropertyCondition(UIA_ProcessIdPropertyId, VARIANT(_pid))
             found = iuia.GetRootElement().FindAll(TreeScope_Descendants, cond)
             pid_names = []
             for k in range(found.Length):
