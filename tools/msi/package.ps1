@@ -46,9 +46,12 @@ if (-not (Test-Path $rtSrc)) { throw "运行时保障脚本缺失: $rtSrc (请�
 Copy-Item $rtSrc (Join-Path $publishRoot 'EnsureRuntime.ps1') -Force
 
 # PublishDir 由命令行传入，界面文件不用改动
-# -ext WixToolset.Util.wixext：EnsureRuntimes CA 用 WixQuietExec64（下载不弹命令窗，全系安装器标准）
+# -ext 全路径：Util 扩展随包内置 tools/msi/wix/ext（云台 dotnet tool 装的 wix 解析不到裸扩展名，
+# run 45007656872 实锤 WIX0144），必须传 DLL 全路径（TaoDown 同款打法）
 # -pdbtype none：不落调试附档（.wixpdb），保证 out 里只有 msi 一项
-& wix build $WxsPath -d "PublishDir=$publishRoot" -o $msi -pdbtype none -ext WixToolset.Util.wixext
+$utilExt = Join-Path $PSScriptRoot 'wix\ext\WixToolset.Util.wixext.dll'
+if (-not (Test-Path $utilExt)) { throw "Util 扩展缺失: $utilExt (请使用完整包)" }
+& wix build $WxsPath -d "PublishDir=$publishRoot" -o $msi -pdbtype none -ext $utilExt
 if ($LASTEXITCODE -ne 0) { throw "WiX 构建 msi 失败" }
 Get-ChildItem $OutDir -Filter *.wixpdb -ErrorAction SilentlyContinue | Remove-Item -Force
 
