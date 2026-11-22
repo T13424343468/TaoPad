@@ -395,7 +395,7 @@ public sealed partial class MainWindow : Window, Services.IThemePaintable
         {
             var fi = new FileInfo(path);
             // 打开链路留痕（X15 排查实锤：此前无日志，转发是否接住全靠截图猜）
-            TraceLog.Write($"打开：{path} ({fi.Exists ? fi.Length : -1}B)");
+            TraceLog.Write($"打开：{path} ({(fi.Exists ? fi.Length : -1)}B)");
             if (!fi.Exists) { ShowMessage("无法打开文件", $"文件不存在：{path}"); RemoveFailedDoc(doc); return; }
             // 超大文件走只读快看通道（v39.3 老板拍板的分治方案）：
             // 编辑器管 ≤50MB 可编辑；超限不拒开，弹独立快看窗按屏解码
