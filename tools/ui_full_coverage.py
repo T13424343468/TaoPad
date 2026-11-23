@@ -1328,6 +1328,38 @@ def _hook_doc_safe():
     return docs[act] if 0 <= act < len(docs) else docs[-1]
 
 
+def _hook_doc_by_path(p, timeout=40.0):
+    """v46m（45116167080 X17 双红实锤）：按路径取文档快照。旧 _hook_doc_safe
+    读活动标签，而转发打开是异步激活——激活到位前活动标签还是上一场
+    残留（正文恰含 watch-probe-v1），同步栏瞬间假绿，v2 抢在应用异步
+    读盘前落盘，应用起步加载的就是 v2，watcher 挂上后磁盘再无变化。
+    钩子快照自带 path 字段，按路径匹配才保证读的是本场新标签；未加载
+    或钩子不可用返回 None。timeout 拉长防界面线程卡顿饿死快照（本场
+    实测 36.8s>旧 10s 超时）。"""
+    try:
+        data = hook_dump(timeout=timeout)
+    except Exception:
+        return None
+    want = (p or "").strip().lower()
+    for d in data.get("docs") or []:
+        if (d.get("path") or "").strip().lower() == want:
+            return d
+    return None
+
+
+def _hook_active_path(timeout=40.0):
+    """v46m：取活动标签路径；钩子不可用返回 None。"""
+    try:
+        data = hook_dump(timeout=timeout)
+    except Exception:
+        return None
+    docs = data.get("docs") or []
+    act = data.get("active", -1)
+    if 0 <= act < len(docs):
+        return (docs[act].get("path") or "").strip().lower()
+    return None
+
+
 def clear_editor_verified(max_rounds=5):
     """44137602413 实锤：X06 起 ^a{DEL} 连续被吞（X05 残留原样带到 X06），
     同班 X03/X04 却 PASS——吞键集中在会话后段。清场必须以钩子正文为证，
@@ -4011,18 +4043,24 @@ def c_external_change():
         f.write("watch-probe-v1\n")
     esc_cleanup()
     _forward_open(p)
-    # v46l（44317775556 X17 实锤）：打开是异步加载，若 v2 外部写先于加载
-    # 落盘，编辑器起步就是 v2，之后「暂不保持 v1」断言必炸。加同步栏：
-    # 轮询钩子正文直到确见 v1 才动 mark、才写 v2
+    # v46m（45116167080 X17 双红实锤）：旧同步栏读活动标签，两处全歪——
+    # ①重跑首轮快照瞬间假绿：转发打开异步激活，活动标签还是上一场残留
+    # （正文恰含 watch-probe-v1），v2 随即落盘，抢在应用异步读盘之前，
+    # 应用起步加载的就是 v2（trace 实锤：打开即 25B=v2+CRLF），watcher
+    # 挂上后磁盘再无变化，「检测到」永不出现；②首轮假红：大档案驻留时
+    # 界面线程长段卡顿（本场 36.8s），钩子快照 10s 超时全饿死，30s 栏限
+    # 到点假红（文件其实 4ms 就加载完了）。改为按路径精确匹配新标签 +
+    # 拉长钩子超时与栏限，确见 v1 才动 mark、才写 v2
     barrier_ok = False
-    deadline = time.time() + 30
+    deadline = time.time() + 90
     while time.time() < deadline:
-        d = _hook_doc_safe()
-        if "watch-probe-v1" in (d.get("text") or ""):
+        d = _hook_doc_by_path(p)
+        if d and "watch-probe-v1" in (d.get("text") or ""):
             barrier_ok = True
             break
         time.sleep(1.0)
-    assert barrier_ok, "X17: 打开后 30s 未确见 v1 正文（加载链未走通）"
+    assert barrier_ok, "X17: 打开后 90s 未按路径确见 v1 正文（加载链未走通）"
+    time.sleep(1.5)   # 留出 SetupWatcher 挂接拍（LoadFileAsync 尾部），防 v2 抢跑
     mark = trace_mark()
     # 干净档案：外部改 → 弹对话框 → ESC 暂不 → 正文保持 v1
     with open(p, "w", encoding="utf-8") as f:
@@ -4048,9 +4086,19 @@ def c_external_change():
         r = hook_command("hint_probe")   # 探针留证：区分没检测到与界面冻住
         print(f"X17: 提示探针: {r.get('commandResult')!r}", flush=True)
     assert ok, f"X17: 干净档案外部修改未确认暂不: {' | '.join(ev)[-160:]!r}"
-    doc = _hook_doc_safe()
-    assert "watch-probe-v1" in (doc.get("text") or ""), "X17: 暂不后正文被改"
+    doc = _hook_doc_by_path(p)
+    assert doc and "watch-probe-v1" in (doc.get("text") or ""), "X17: 暂不后正文被改"
     # 未保存改动：外部改 → 仅提醒，不弹框
+    # v46m：type 命令打在活动标签上——转发打开异步激活，必须确见新标签
+    # 到位再动笔，防止 dirty 打进上一场残留标签、断言全歪
+    act_ok = False
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        if _hook_active_path() == p.strip().lower():
+            act_ok = True
+            break
+        time.sleep(1.0)
+    assert act_ok, "X17: 新标签 90s 未成为活动标签（type 会打错档案）"
     mark2 = trace_mark()
     hook_command("type", "dirty ")
     time.sleep(0.5)
