@@ -1541,6 +1541,51 @@ def _picker_edit(h, timeout=6.0):
     return None
 
 
+def _focus_dialog(h):
+    """v49：把前台切到对话框并验证。返回 True=前台已是该对话框。
+    AttachThreadInput 绕前台锁（与 focus_main 同族思路），切不动返回
+    False，调用方验证不过不得盲发按键（run 45084738076 实锤：picker
+    冷启动焦点未落对话框，^a/^v/ENTER 盲发进主窗正文——路径串被粘进
+    编辑器并随保存落盘，级联污染 O02/O05）。"""
+    try:
+        import win32gui
+    except Exception:
+        return False
+    try:
+        if win32gui.GetForegroundWindow() == h:
+            return True
+    except Exception:
+        pass
+    try:
+        import win32api
+        import win32process
+        fg = win32gui.GetForegroundWindow()
+        tid_fg = win32process.GetWindowThreadProcessId(fg)[0]
+        tid_me = win32process.GetWindowThreadProcessId(h)[0]
+        attached = False
+        if tid_fg != tid_me:
+            try:
+                win32api.AttachThreadInput(tid_fg, tid_me, True)
+                attached = True
+            except Exception:
+                pass
+        try:
+            win32gui.SetForegroundWindow(h)
+        finally:
+            if attached:
+                try:
+                    win32api.AttachThreadInput(tid_fg, tid_me, False)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    time.sleep(0.3)
+    try:
+        return win32gui.GetForegroundWindow() == h
+    except Exception:
+        return False
+
+
 def picker_typing(path, wait=3.0):
     t0 = time.time()
     h = None
@@ -1560,7 +1605,7 @@ def picker_typing(path, wait=3.0):
         time.sleep(0.8)
         send_keys("{ENTER}")
         time.sleep(1.5)
-        return
+        return "no-dialog"
     time.sleep(0.5)
     for attempt in range(3):
         e = _picker_edit(h)
@@ -1581,6 +1626,23 @@ def picker_typing(path, wait=3.0):
                 time.sleep(0.8)
                 send_keys("{ENTER}")
         else:
+            # v49 焦点守卫（run 45084738076 实锤）：picker 冷启动焦点未落
+            # 对话框时，^a/^v/ENTER 盲发进主窗正文——路径串被粘进编辑器并
+            # 随保存落盘，级联污染 O02/O05。先把前台切到对话框并验证到位
+            # 才发键；验证不过 ESC 收层进下一轮，绝不盲发。
+            if not _focus_dialog(h):
+                send_keys("{ESC}")
+                time.sleep(0.8)
+                try:
+                    import win32gui
+                    h2 = win32gui.FindWindow("#32770", None)
+                    if not h2:
+                        break
+                    h = h2
+                    e = None
+                except Exception:
+                    break
+                continue
             send_keys("^a")
             time.sleep(0.25)
             send_keys("^v")             # 整段粘贴，杜绝逐键输入被吞
@@ -1605,6 +1667,15 @@ def picker_typing(path, wait=3.0):
             e = None
         except Exception:
             break
+    # v49：三轮未收层=picker 链路未走通，收掉残层再返回，不留脏对话框
+    # 污染下一用例（焦点守卫拦截后对话框可能仍开着）。
+    try:
+        import win32gui
+        if win32gui.FindWindow("#32770", None):
+            send_keys("{ESC}")
+            time.sleep(0.5)
+    except Exception:
+        pass
     # 已存在替换确认框：键入回车默认=是
     for _ in range(2):
         try:
@@ -1620,6 +1691,7 @@ def picker_typing(path, wait=3.0):
             pass
         break
     time.sleep(0.8)   # 应用侧选择器返回后落盘留痕
+    return "dialog"
 
 
 def wer_count():
@@ -3378,6 +3450,10 @@ def c_save():
     time.sleep(0.6)
     picker_typing(FILE1)
     assert os.path.exists(FILE1), "保存后文件不存在: " + FILE1
+    # v49 内容断言（run 45084738076 实锤）：picker 兜底把路径串粘进正文且
+    # 随保存落盘，O01 只查存在放行脏档，级联污染 O02/O05。源头当场验内容。
+    with open(FILE1, encoding="utf-8") as f:
+        assert "save-me-内容" in f.read(), "保存内容被污染（路径串落盘）"
     shot("case-save")
 
 
@@ -3386,7 +3462,10 @@ def c_open():
     focus_main()
     send_keys("^o")
     time.sleep(0.6)
-    picker_typing(FILE1)
+    route = picker_typing(FILE1)
+    # v49：打开必有对话框；走 no-dialog 路说明 picker 链路未走通，
+    # 路径已粘进正文，直接定性失败（不许静默）。
+    assert route == "dialog", "打开对话框未弹出（picker 链路未走通）"
     time.sleep(1.2)
     got = editor_clipboard().strip()
     assert got == "save-me-内容", f"打开后内容不对: {got!r}"
@@ -3402,6 +3481,10 @@ def c_save_as():
     time.sleep(0.6)
     picker_typing(FILE2B)
     assert os.path.exists(FILE2B), "另存为文件不存在"
+    # v49 污染哨兵（run 45084738076 实锤级联链）：正文被粘路径后另存落盘。
+    # 文件内容出现用户目录片段即判污染，当场爆红不级联。
+    with open(FILE2B, encoding="utf-8") as f:
+        assert "runneradmin" not in f.read(), "另存为内容被路径串污染"
     shot("case-save-as")
 
 
