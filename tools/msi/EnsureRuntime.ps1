@@ -19,6 +19,15 @@ function Write-RtLog([string]$m) {
     try { Add-Content -Path $log -Value ("{0} {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $m) } catch { }
 }
 
+# 网络环境诊断: 真机失败时日志自带代理快照, 不再靠猜 (用户真机 2026-11-24 教训: 手动下载正常而安装器失败)
+try {
+    $winet = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -ErrorAction SilentlyContinue
+    Write-RtLog ("net-diag wininet-proxy=" + $(if ($winet -and $winet.ProxyEnable) { $winet.ProxyServer } else { 'off' }))
+    $dp = [System.Net.WebRequest]::DefaultWebProxy
+    $dpu = if ($dp) { $dp.GetProxy([uri]'https://aka.ms').ToString() } else { 'none' }
+    Write-RtLog ("net-diag effective-proxy=" + $dpu)
+} catch { Write-RtLog ("net-diag error " + $_.Exception.Message) }
+
 # 通用下载器: 三轮重试, 每轮 iwr(带超时) 与系统自带 curl.exe(带重试) 各试一次, 全灭才报败。
 # 真机实锤: 安装进程跑在管理员上下文, 网络环境与用户浏览器不同(不带用户代理设置);
 #   旧版 iwr 无超时会无限干等、单次失败即死 —— 用户真机手动下载正常, 问题在下载路自身而非源。
