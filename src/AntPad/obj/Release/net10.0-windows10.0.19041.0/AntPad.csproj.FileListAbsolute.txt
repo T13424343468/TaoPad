@@ -1,0 +1,1 @@
+/root/workspace/taopad-check/src/AntPad/obj/Release/net10.0-windows10.0.19041.0/AntPad.csproj.AssemblyReference.cache
