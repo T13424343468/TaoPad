@@ -28,10 +28,10 @@ try {
     Write-RtLog ("net-diag effective-proxy=" + $dpu)
 } catch { Write-RtLog ("net-diag error " + $_.Exception.Message) }
 
-# 通用下载器: 三轮重试, 每轮 iwr(带超时) 与系统自带 curl.exe(带重试) 各试一次, 全灭才报败。
+# 通用下载器: 三步走 (老板 2026-11-24 拍板) —— 在线三轮重试(每轮 iwr 带超时 + curl 带重试各一次) → 全灭用包内兜底 → 都没有才报败。
 # 真机实锤: 安装进程跑在管理员上下文, 网络环境与用户浏览器不同(不带用户代理设置);
 #   旧版 iwr 无超时会无限干等、单次失败即死 —— 用户真机手动下载正常, 问题在下载路自身而非源。
-function Get-OfficialFile([string]$url, [string]$outFile) {
+function Get-OfficialFile([string]$url, [string]$outFile, [string]$bundledName) {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     for ($i = 1; $i -le 3; $i++) {
         try {
@@ -55,6 +55,15 @@ function Get-OfficialFile([string]$url, [string]$outFile) {
             Write-RtLog ("curl-failed attempt=" + $i + " " + $_.Exception.Message)
         }
         Start-Sleep -Seconds (3 * $i)
+    }
+    # 内置兜底: 在线全灭, 用安装包自带的那份 (打包时随包内置, 系统里仍只装一份不重复)
+    if ($bundledName) {
+        $bundled = Join-Path $PSScriptRoot (Join-Path 'fallback' $bundledName)
+        if (Test-Path $bundled) {
+            Copy-Item $bundled $outFile -Force
+            Write-RtLog 'download-failed using-bundled-fallback'
+            return $true
+        }
     }
     Write-RtLog 'download-failed all-attempts-exhausted'
     return $false
@@ -175,7 +184,7 @@ if ($ForceDownload -ne '1' -and (Test-WinAppRuntime)) {
 } else {
     Write-RtLog 'winappruntime-missing, downloading official runtime installer'
     $waExe = Join-Path $env:TEMP 'WindowsAppRuntimeInstall-x64.exe'
-    if (-not (Get-OfficialFile 'https://aka.ms/windowsappsdk/1.5/latest/windowsappruntimeinstall-x64.exe' $waExe)) {
+    if (-not (Get-OfficialFile 'https://aka.ms/windowsappsdk/1.5/latest/windowsappruntimeinstall-x64.exe' $waExe 'windowsappruntimeinstall-x64.exe')) {
         Show-NoNetwork '界面框架运行时' 62
         exit 1602
     }
@@ -218,7 +227,7 @@ if ($ForceDownload -ne '1' -and (Test-VcRuntime)) {
 } else {
     Write-RtLog 'vcruntime-missing, downloading official redistributable'
     $vcExe = Join-Path $env:TEMP 'vc_redist.x64.exe'
-    if (-not (Get-OfficialFile 'https://aka.ms/vs/17/release/vc_redist.x64.exe' $vcExe)) {
+    if (-not (Get-OfficialFile 'https://aka.ms/vs/17/release/vc_redist.x64.exe' $vcExe 'vc_redist.x64.exe')) {
         Show-NoNetwork '系统组件' 25
         exit 1602
     }
