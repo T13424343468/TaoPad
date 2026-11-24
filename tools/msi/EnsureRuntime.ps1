@@ -19,23 +19,36 @@ function Write-RtLog([string]$m) {
     try { Add-Content -Path $log -Value ("{0} {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $m) } catch { }
 }
 
-# 通用下载器: iwr 先行, 失败回落系统自带 curl.exe (32 位 PS 5.1 在 SYSTEM 上下文偶发秒败, run 44875970874 实锤)
+# 通用下载器: 三轮重试, 每轮 iwr(带超时) 与系统自带 curl.exe(带重试) 各试一次, 全灭才报败。
+# 真机实锤: 安装进程跑在管理员上下文, 网络环境与用户浏览器不同(不带用户代理设置);
+#   旧版 iwr 无超时会无限干等、单次失败即死 —— 用户真机手动下载正常, 问题在下载路自身而非源。
 function Get-OfficialFile([string]$url, [string]$outFile) {
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $url -OutFile $outFile -UseBasicParsing
-    } catch {
-        Write-RtLog ("iwr-failed " + $_.Exception.Message + ", fallback to curl.exe")
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    for ($i = 1; $i -le 3; $i++) {
         try {
-            $p = Start-Process -FilePath 'curl.exe' -ArgumentList '-L', '-f', '-o', "`"$outFile`"", '--max-time', '600', "`"$url`"" -Wait -PassThru -NoNewWindow
-            if ($p.ExitCode -ne 0) { throw "curl exit=$($p.ExitCode)" }
-            if (-not (Test-Path $outFile) -or (Get-Item $outFile).Length -lt 1KB) { throw "curl 产物异常偏小" }
+            Invoke-WebRequest -Uri $url -OutFile $outFile -UseBasicParsing -TimeoutSec 300
+            if ((Test-Path $outFile) -and (Get-Item $outFile).Length -gt 1KB) {
+                Write-RtLog ("download-ok iwr attempt=" + $i)
+                return $true
+            }
+            throw "iwr 产物异常偏小"
         } catch {
-            Write-RtLog ("download-failed " + $_.Exception.Message)
-            return $false
+            Write-RtLog ("iwr-failed attempt=" + $i + " " + $_.Exception.Message)
         }
+        try {
+            $p = Start-Process -FilePath 'curl.exe' -ArgumentList '-L', '-f', '--retry', '3', '--retry-delay', '2', '--connect-timeout', '30', '-o', "`"$outFile`"", '--max-time', '600', "`"$url`"" -Wait -PassThru -NoNewWindow
+            if ($p.ExitCode -eq 0 -and (Test-Path $outFile) -and (Get-Item $outFile).Length -gt 1KB) {
+                Write-RtLog ("download-ok curl attempt=" + $i)
+                return $true
+            }
+            throw "curl exit=$($p.ExitCode)"
+        } catch {
+            Write-RtLog ("curl-failed attempt=" + $i + " " + $_.Exception.Message)
+        }
+        Start-Sleep -Seconds (3 * $i)
     }
-    return (Test-Path $outFile)
+    Write-RtLog 'download-failed all-attempts-exhausted'
+    return $false
 }
 
 # 无网统一指引: 仅交互会话弹窗; SYSTEM/会话0 里弹窗无人点击会挂死安装 (防御性修复)
