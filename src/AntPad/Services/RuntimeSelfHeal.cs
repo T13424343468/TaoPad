@@ -47,6 +47,19 @@ internal static class RuntimeSelfHeal
         }
         TraceLog.Write($"自愈：运行时缺失或初始化失败 (hr=0x{hr:X8})");
 
+        // 0) 包内兜底优先（2026-11-25 老板令「安装绝不依赖网络」同口径延伸到应用侧）：
+        //    安装包 fallback\ 里自带官方安装器，离线直接装，不弹下载框、不碰网络。
+        //    只有包内没有兜底（如源码直跑）或兜底装完仍失败时，才走在线下载线路。
+        if (TryInstallFromBundled())
+        {
+            if (TryInit(out hr))
+            {
+                TraceLog.Write("自愈：兜底安装后运行时在位，重启自身");
+                RestartSelf();
+            }
+            TraceLog.Write($"自愈：兜底安装后仍初始化失败 (hr=0x{hr:X8})，转在线线路");
+        }
+
         var choice = MessageBox(
             "TaoPad 需要微软官方的「Windows App SDK 运行时」才能启动界面（约 64 MB，只需安装一次）。\n\n" +
             "点「是(Y)」自动下载并安装（会请求管理员权限）；点「否(N)」退出程序。",
@@ -93,15 +106,7 @@ internal static class RuntimeSelfHeal
         if (TryInit(out hr))
         {
             TraceLog.Write("自愈：安装后运行时在位，重启自身");
-            try
-            {
-                Process.Start(new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = true });
-            }
-            catch (Exception ex)
-            {
-                TraceLog.Write($"自愈：重启失败 {ex.GetType().Name}：{ex.Message}");
-            }
-            Environment.Exit(0);
+            RestartSelf();
         }
 
         // 4) 仍失败：给手动指引
@@ -113,6 +118,63 @@ internal static class RuntimeSelfHeal
             "下载地址：" + InstallerUrl,
             "TaoPad 运行时安装", MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
         Environment.Exit(1);
+    }
+
+    /// <summary>
+    /// 包内兜底安装：找安装包随包内置的官方运行时安装器（fallback\windowsappruntimeinstall-x64.exe），
+    /// 提权静默安装。找到并跑完返回 true；包内没有（源码直跑）或用户拒绝提权返回 false，转在线线路。
+    /// </summary>
+    private static bool TryInstallFromBundled()
+    {
+        string? exeDir = Path.GetDirectoryName(Environment.ProcessPath);
+        string[] candidates =
+        {
+            Path.Combine(AppContext.BaseDirectory, "fallback", "windowsappruntimeinstall-x64.exe"),
+            Path.Combine(exeDir ?? string.Empty, "fallback", "windowsappruntimeinstall-x64.exe"),
+            Path.Combine(exeDir ?? string.Empty, "windowsappruntimeinstall-x64.exe"),
+        };
+        string? bundled = candidates.FirstOrDefault(File.Exists);
+        if (bundled == null)
+        {
+            TraceLog.Write("自愈：包内兜底安装器不存在（源码直跑或旧包），转在线线路");
+            return false;
+        }
+        TraceLog.Write($"自愈：发现包内兜底安装器 {bundled}，离线安装（不弹下载框）");
+        try
+        {
+            ShowBusy("正在安装 TaoPad 自带的运行时组件，请稍候…", () =>
+            {
+                var psi = new ProcessStartInfo(bundled, "--quiet --force")
+                {
+                    Verb = "runas",              // 一次拿到管理员权限（全系安装器标准）
+                    UseShellExecute = true,
+                    CreateNoWindow = true
+                };
+                using var p = Process.Start(psi)!;
+                p.WaitForExit();
+                TraceLog.Write($"自愈：兜底安装器退出码 {p.ExitCode}");
+            });
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // 用户拒绝 UAC 或安装器启动失败：不拦启动路径，转在线线路
+            TraceLog.Write($"自愈：兜底安装未完成 {ex.GetType().Name}：{ex.Message}");
+            return false;
+        }
+    }
+
+    private static void RestartSelf()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            TraceLog.Write($"自愈：重启失败 {ex.GetType().Name}：{ex.Message}");
+        }
+        Environment.Exit(0);
     }
 
     private static bool TryInit(out int hr)
