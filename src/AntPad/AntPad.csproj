@@ -22,9 +22,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <Version>1.1.4</Version>
-    <FileVersion>1.1.4</FileVersion>
-    <InformationalVersion>1.1.4</InformationalVersion>
+    <Version>1.1.5</Version>
+    <FileVersion>1.1.5</FileVersion>
+    <InformationalVersion>1.1.5</InformationalVersion>
     <Product>TaoPad</Product>
     <Company>Tao</Company>
     <Copyright>Copyright (c) 2026</Copyright>

@@ -99,6 +99,32 @@ function Test-DesktopRuntime10 {
         return $false
     } catch { return $false }
 }
+
+# .NET 内置兜底 (2026-11-25 老板令: 安装绝不依赖网络): 在线全灭时, 把包内自带的
+#   官方运行时 zip (基础包 + 桌面包, 两件套缺一不可——desktop zip 只含 WindowsDesktop.App,
+#   基础 NETCore.App 在 dotnet-runtime zip 里) 解压进系统统一 .NET 目录。
+#   zip 解包不走 MSI 链, 与本产品 MSI 事务无互斥; 解后以实测为准。
+function Install-DesktopRuntimeFromBundledZip {
+    $fbDir = Join-Path $PSScriptRoot 'fallback'
+    $zips = @(Get-ChildItem $fbDir -Filter 'dotnet-runtime-*-win-x64.zip' -ErrorAction SilentlyContinue) +
+            @(Get-ChildItem $fbDir -Filter 'windowsdesktop-runtime-*-win-x64.zip' -ErrorAction SilentlyContinue)
+    if ($zips.Count -lt 2) { Write-RtLog 'net-fallback zip-missing'; return $false }
+    try {
+        $dotnetDir = 'C:\Program Files\dotnet'
+        New-Item -ItemType Directory -Force -Path $dotnetDir | Out-Null
+        foreach ($z in $zips) {
+            Write-RtLog ("net-fallback expand " + $z.Name)
+            Expand-Archive -Path $z.FullName -DestinationPath $dotnetDir -Force
+        }
+    } catch {
+        Write-RtLog ("net-fallback expand-failed " + $_.Exception.Message)
+        return $false
+    }
+    if (Test-DesktopRuntime10) { Write-RtLog 'net-fallback verify-ok'; return $true }
+    Write-RtLog 'net-fallback verify-failed'
+    return $false
+}
+
 if ($ForceDownload -ne '1' -and (Test-DesktopRuntime10)) {
     Write-RtLog 'runtime-present zero-download'
 } else {
@@ -107,22 +133,28 @@ if ($ForceDownload -ne '1' -and (Test-DesktopRuntime10)) {
     #   不用 windowsdesktop-runtime 安装器 exe——它是 MSI 链, 在本产品 MSI 事务内启动必撞
     #   _MSIExecute 互斥 → 退出码 1618 (run 44886290820 实锤); 脚本解包不走 MSI, 无互斥冲突。
     $dnScript = Join-Path $env:TEMP 'dotnet-install.ps1'
-    if (-not (Get-OfficialFile 'https://dot.net/v1/dotnet-install.ps1' $dnScript)) {
+    $onlineOk = Get-OfficialFile 'https://dot.net/v1/dotnet-install.ps1' $dnScript
+    if ($onlineOk) {
+        Write-RtLog 'download-ok, installing official runtime into system dotnet dir'
+        # dotnet-install.ps1 成功时不设退出码, $LASTEXITCODE 会是 null (run 44886957984 实锤误判);
+        #   以 try/catch + 装后实测为准
+        try {
+            & $dnScript -Runtime windowsdesktop -Channel 10.0 -InstallDir 'C:\Program Files\dotnet'
+            Write-RtLog 'dotnet-install script returned'
+        } catch {
+            Write-RtLog ("dotnet-install failed " + $_.Exception.Message)
+        }
+    } else {
+        Write-RtLog 'dotnet-install-script download-failed, trying bundled zip'
+    }
+    if (Test-DesktopRuntime10) {
+        Write-RtLog 'runtime-download-install ok'
+    } elseif (Install-DesktopRuntimeFromBundledZip) {
+        Write-RtLog 'runtime-install ok (bundled-zip)'
+    } else {
         Show-NoNetwork '.NET 运行时' 60
         exit 1602
     }
-    Write-RtLog 'download-ok, installing official runtime into system dotnet dir'
-    # dotnet-install.ps1 成功时不设退出码, $LASTEXITCODE 会是 null (run 44886957984 实锤误判);
-    #   以 try/catch + 装后实测为准
-    try {
-        & $dnScript -Runtime windowsdesktop -Channel 10.0 -InstallDir 'C:\Program Files\dotnet'
-        Write-RtLog 'dotnet-install script returned'
-    } catch {
-        Write-RtLog ("dotnet-install failed " + $_.Exception.Message)
-        exit 31338
-    }
-    if (-not (Test-DesktopRuntime10)) { Write-RtLog 'verify-failed'; exit 31337 }
-    Write-RtLog 'runtime-download-install ok'
 }
 
 # ---- 2) Windows App SDK 运行时 (界面框架, 1.5) ----

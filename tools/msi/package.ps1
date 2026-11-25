@@ -45,17 +45,22 @@ $rtSrc = Join-Path $PSScriptRoot 'EnsureRuntime.ps1'
 if (-not (Test-Path $rtSrc)) { throw "运行时保障脚本缺失: $rtSrc (请使用完整包)" }
 Copy-Item $rtSrc (Join-Path $publishRoot 'EnsureRuntime.ps1') -Force
 
-# ---- 内置兜底 (2026-11-24 老板拍板三步走): 检测已有 → 在线拉 → 内置兜底 ----
+# ---- 内置兜底 (2026-11-24 老板拍板三步走; 2026-11-25 老板令升级为安装绝不依赖网络) ----
 # 打包时下载官方运行时安装器随包内置 (打包机网络可靠); 装机时在线拉不动才用兜底。
 # 系统里运行时永远只装一份 (机器级共享, 装前必检测), 兜底文件只是备胎不重复安装。
-# .NET 桌面运行时不内置: 其官方安装器是 MSI 链, 在本产品 MSI 事务内必撞 _MSIExecute 互斥 (TaoDown run 44886290820 实锤),
-#   仍走 dotnet-install 官方脚本在线路 (加固版三轮重试)。
+# .NET 桌面运行时: 官方安装器 exe 是 MSI 链, 在本产品 MSI 事务内必撞 _MSIExecute 互斥
+#   (TaoDown run 44886290820 实锤), 故内置 zip 两件套 (基础包 + 桌面包, 缺一不可——
+#   desktop zip 只含 WindowsDesktop.App, 基础 NETCore.App 在 dotnet-runtime zip 里),
+#   EnsureRuntime 在线全灭时解包进系统统一 .NET 目录, 不走 MSI 无互斥。
+#   zip 版本 10.0.15 (2026-11-25 官方 10.0 通道现行版), 在线路始终取最新, 兜底仅应急。
 # WinAppSDK 用 1.5 版 URL, 与 EnsureRuntime.ps1 检测口径一致。
 $fallbackDir = Join-Path $publishRoot 'fallback'
 New-Item -ItemType Directory -Force -Path $fallbackDir | Out-Null
 $fbItems = @(
     @{ Name = 'windowsappruntimeinstall-x64.exe'; Url = 'https://aka.ms/windowsappsdk/1.5/latest/windowsappruntimeinstall-x64.exe' },
-    @{ Name = 'vc_redist.x64.exe'; Url = 'https://aka.ms/vs/17/release/vc_redist.x64.exe' }
+    @{ Name = 'vc_redist.x64.exe'; Url = 'https://aka.ms/vs/17/release/vc_redist.x64.exe' },
+    @{ Name = 'dotnet-runtime-10.0.15-win-x64.zip'; Url = 'https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.15/dotnet-runtime-10.0.15-win-x64.zip' },
+    @{ Name = 'windowsdesktop-runtime-10.0.15-win-x64.zip'; Url = 'https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/10.0.15/windowsdesktop-runtime-10.0.15-win-x64.zip' }
 )
 foreach ($fb in $fbItems) {
     $dst = Join-Path $fallbackDir $fb.Name
