@@ -79,11 +79,18 @@ public partial class App : Application
         // 只记日志不退出（进程继续运行，避免后台偶发错误带崩整个程序）
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
-            Services.TraceLog.Write($"后台线程异常，退出={e.IsTerminating}");
+            // 现场并入行车记录仪：真机只回传 trace.log 时也能定案
+            // （1.1.4 真机三连崩，crash.log 有栈但用户只发了 trace.log，教训）
             if (e.ExceptionObject is Exception ex)
+            {
+                Services.TraceLog.Write($"后台线程异常，退出={e.IsTerminating}：{ex.GetType().Name}：{ex.Message}\r\n{ex.StackTrace}");
                 CrashLog.Report(ex, $"后台线程未处理异常 (退出={e.IsTerminating})");
+            }
             else
+            {
+                Services.TraceLog.Write($"后台线程异常，退出={e.IsTerminating}：{e.ExceptionObject?.ToString() ?? "非异常对象"}");
                 CrashLog.Report(new Exception(e.ExceptionObject?.ToString() ?? "非异常对象"), "后台线程未处理异常");
+            }
         };
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {
